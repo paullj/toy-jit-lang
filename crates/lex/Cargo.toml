@@ -1,0 +1,13 @@
+[package]
+name = "lex"
+authors = ["Paul Lavender-Jones <paul@lavender-jones.com>"]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+
+[dependencies]
+logos = "0.15.0"
+
+[dev-dependencies]
+rstest = "0.25.0"
