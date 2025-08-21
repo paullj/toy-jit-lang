@@ -4,18 +4,21 @@ use rowan::{GreenNode, GreenNodeBuilder};
 use crate::event::Event;
 use syntax::SyntaxKind;
 
+/// Builds a concrete syntax tree from parsing events
 pub struct Sink {
     builder: GreenNodeBuilder<'static>,
 }
 
 // TODO: Change this api to be a bit nicer
 impl Sink {
+    /// Creates a new sink for building a syntax tree
     pub fn new() -> Self {
         Self {
             builder: GreenNodeBuilder::new(),
         }
     }
 
+    /// Processes events to build the final syntax tree
     pub fn build(mut self, events: Vec<Event>) -> GreenNode {
         for event in events {
             match event {

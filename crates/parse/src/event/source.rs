@@ -2,21 +2,24 @@ use std::iter::Peekable;
 
 use lex::{Lexer, Token};
 
+/// Token source that separates trivia from meaningful tokens
 pub(crate) struct Source<'a> {
     lexer: Peekable<Lexer<'a>>,
-    trivia_buffer: Vec<Token<'a>>,
+    buffer: Vec<Token<'a>>,
 }
 
+/// Wrapper that includes trivia tokens alongside the main token
 pub(crate) struct WithTrivia<'a, T> {
     pub trivia: Vec<Token<'a>>,
     pub token: Option<T>,
 }
 
 impl<'a> Source<'a> {
+    /// Creates a new token source from source code
     pub(crate) fn new(source: &'a str) -> Self {
         Self {
             lexer: Lexer::new(source).peekable(),
-            trivia_buffer: Vec::new(),
+            buffer: Vec::new(),
         }
     }
 
@@ -36,20 +39,24 @@ impl<'a> Source<'a> {
         }
     }
 
+    /// Returns next token with any preceding trivia
     pub(crate) fn next(&mut self) -> WithTrivia<'a, Token<'a>> {
         self.consume_trivia();
 
-        let trivia = std::mem::take(&mut self.trivia_buffer);
+        // NOTE: take() moves trivia out of buffer, leaving empty vec
+        let trivia = std::mem::take(&mut self.buffer);
         let token = self.internal_next();
 
         WithTrivia { trivia, token }
     }
 
+    /// Peeks at next non-trivia token
     pub(crate) fn peek(&mut self) -> Option<&Token<'a>> {
         self.consume_trivia();
         self.internal_peek()
     }
 
+    /// Checks if current token is trivia without consuming it
     pub(crate) fn at_trivia(&mut self) -> bool {
         if let Some(token) = self.internal_peek() {
             token.kind.is_trivia()
@@ -58,10 +65,11 @@ impl<'a> Source<'a> {
         }
     }
 
+    /// Consumes all consecutive trivia tokens into buffer
     pub(crate) fn consume_trivia(&mut self) {
         while self.at_trivia() {
             if let Some(token) = self.internal_next() {
-                self.trivia_buffer.push(token);
+                self.buffer.push(token);
             }
         }
     }
