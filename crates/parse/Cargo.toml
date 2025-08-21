@@ -1,0 +1,15 @@
+[package]
+name = "parse"
+authors = ["Paul Lavender-Jones <paul@lavender-jones.com>"]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+lex = { path = "../lex" }
+syntax = { path = "../syntax" }
+rowan = "0.16.1"
+drop_bomb = "0.1.5"
+
+[dev-dependencies]
+rstest = "0.19.0"
