@@ -58,6 +58,12 @@ pub enum TokenKind {
     // Float,
 }
 
+impl TokenKind {
+    pub fn is_trivia(self) -> bool {
+        matches!(self, Self::Whitespace | Self::EOL | Self::Comment)
+    }
+}
+
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -73,5 +79,62 @@ impl Display for TokenKind {
             TokenKind::Identifier => write!(f, "identifier"),
             TokenKind::Integer => write!(f, "integer"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case(" ", TokenKind::Whitespace)]
+    #[case("\t", TokenKind::Whitespace)]
+    #[case("# comment", TokenKind::Comment)]
+    #[case("\n", TokenKind::EOL)]
+    #[case("+", TokenKind::Plus)]
+    #[case("-", TokenKind::Minus)]
+    #[case("*", TokenKind::Asterisk)]
+    #[case("/", TokenKind::Slash)]
+    #[case(":=", TokenKind::ColonEquals)]
+    #[case("identifier", TokenKind::Identifier)]
+    #[case("0", TokenKind::Integer)]
+    fn test_single_token(#[case] input: &str, #[case] expected_kind: TokenKind) {
+        let mut lexer = TokenKind::lexer(input);
+        let kind = lexer.next().unwrap().expect("token is none");
+
+        assert_eq!(kind, expected_kind);
+    }
+
+    #[rstest]
+    #[case(TokenKind::Whitespace)]
+    #[case(TokenKind::Comment)]
+    #[case(TokenKind::EOL)]
+    fn test_is_trivia(#[case] kind: TokenKind) {
+        assert_eq!(kind.is_trivia(), true);
+    }
+
+    #[rstest]
+    #[case(TokenKind::Identifier)]
+    #[case(TokenKind::Integer)]
+    #[case(TokenKind::Echo)]
+    fn test_is_not_trivia(#[case] kind: TokenKind) {
+        assert_eq!(kind.is_trivia(), false);
+    }
+
+    #[rstest]
+    #[case(TokenKind::Whitespace, "whitespace")]
+    #[case(TokenKind::Comment, "#")]
+    #[case(TokenKind::EOL, "newline")]
+    #[case(TokenKind::Plus, "+")]
+    #[case(TokenKind::Minus, "-")]
+    #[case(TokenKind::Asterisk, "*")]
+    #[case(TokenKind::Slash, "/")]
+    #[case(TokenKind::ColonEquals, ":=")]
+    #[case(TokenKind::Echo, "echo")]
+    #[case(TokenKind::Identifier, "identifier")]
+    #[case(TokenKind::Integer, "integer")]
+    fn test_token_kind_display(#[case] token_kind: TokenKind, #[case] expected: &str) {
+        assert_eq!(format!("{}", token_kind), expected);
     }
 }

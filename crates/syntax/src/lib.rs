@@ -29,11 +29,14 @@ pub enum SyntaxKind {
 
     Integer,
     Identifier,
+
+    // Nodes
+    VariableDefinition,
 }
 
 impl SyntaxKind {
     pub fn is_trivia(self) -> bool {
-        matches!(self, SyntaxKind::Whitespace | SyntaxKind::Comment)
+        matches!(self, Self::Whitespace | Self::Comment | Self::EOL)
     }
 }
 
