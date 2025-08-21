@@ -1,0 +1,12 @@
+[package]
+name = "cli"
+authors = ["Paul Lavender-Jones <paul@lavender-jones.com>"]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+
+[dependencies]
+clap = { version = "4.5.41", features = ["derive"] }
+lex = { path = "../lex" }
+parse = { path = "../parse" }
