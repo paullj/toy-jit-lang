@@ -13,9 +13,9 @@ pub fn parse(input: &str) -> (SyntaxNode, Vec<ParseError>) {
     let source = Source::new(input);
     let parser = Parser::new(source);
 
-    let (events, errors) = parser.parse();
+    let events = parser.parse();
     let sink = Sink::new();
-    let green_node = sink.build(events);
+    let (green_node, errors) = sink.build(events);
     (SyntaxNode::new_root(green_node), errors)
 }
 
@@ -25,7 +25,7 @@ mod tests {
 
     #[test]
     fn parse_test() {
-        let (tree, _errors) = parse("my_var := 100");
+        let (tree, _errors) = parse("my_var := ");
         println!("{:#?}", tree);
     }
 }

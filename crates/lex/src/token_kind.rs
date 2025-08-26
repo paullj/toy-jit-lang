@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Display, write};
 
 use crate::error::Error;
 use logos::Logos;
@@ -14,10 +14,10 @@ pub enum TokenKind {
     EOL,
 
     // Single-character tokens
-    // #[token("(")]
-    // LeftParenthesis,
-    // #[token(")")]
-    // RightParenthesis,
+    #[token("(")]
+    LeftParenthesis,
+    #[token(")")]
+    RightParenthesis,
     // #[token("{")]
     // LeftBrace,
     // #[token("}")]
@@ -34,6 +34,8 @@ pub enum TokenKind {
     Asterisk,
     #[token("/")]
     Slash,
+    #[token("=")]
+    Equals,
 
     // Multi-character tokens
     #[token(":=")]
@@ -78,6 +80,9 @@ impl Display for TokenKind {
             TokenKind::Echo => write!(f, "echo"),
             TokenKind::Identifier => write!(f, "identifier"),
             TokenKind::Integer => write!(f, "integer"),
+            TokenKind::Equals => write!(f, "="),
+            TokenKind::LeftParenthesis => write!(f, "("),
+            TokenKind::RightParenthesis => write!(f, ")"),
         }
     }
 }

@@ -51,8 +51,12 @@ fn main() -> ExitCode {
                 }
                 Commands::Parse { source } => {
                     let contents = get_source_contents(source);
-                    let (tree, _errors) = parse(contents.as_str());
+                    let (tree, errors) = parse(contents.as_str());
                     println!("{:#?}", tree);
+
+                    for ele in errors {
+                        eprintln!("{:?}", ele)
+                    }
                 }
             }
             return ExitCode::SUCCESS;

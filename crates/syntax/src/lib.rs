@@ -9,6 +9,8 @@ use num_traits::FromPrimitive;
 pub enum SyntaxKind {
     Root = 0,
 
+    Error,
+
     // Trivia tokens
     Whitespace,
     Comment,
@@ -17,12 +19,11 @@ pub enum SyntaxKind {
     // Tokens
     LeftParenthesis,
     RightParenthesis,
-
     Plus,
     Minus,
     Asterisk,
     Slash,
-
+    Equals,
     ColonEquals,
 
     Echo,
@@ -32,6 +33,12 @@ pub enum SyntaxKind {
 
     // Nodes
     VariableDefinition,
+    VariableAssignment,
+    VariableReference,
+    InfixExpr,
+    Literal,
+    ParenExpr,
+    PrefixExpr,
 }
 
 impl SyntaxKind {
@@ -60,6 +67,9 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::Echo => SyntaxKind::Echo,
             TokenKind::Identifier => SyntaxKind::Identifier,
             TokenKind::Integer => SyntaxKind::Integer,
+            TokenKind::Equals => SyntaxKind::Equals,
+            TokenKind::LeftParenthesis => SyntaxKind::LeftParenthesis,
+            TokenKind::RightParenthesis => SyntaxKind::RightParenthesis,
         }
     }
 }

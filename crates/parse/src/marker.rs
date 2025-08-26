@@ -30,6 +30,14 @@ impl Marker {
 
         CompletedMarker { at: self.at }
     }
+
+    pub(crate) fn discard(mut self, parser: &mut Parser) {
+        self.bomb.defuse();
+
+        let event_at_pos = &mut parser.events[self.at];
+        assert_eq!(*event_at_pos, Event::Placeholder);
+        parser.events.remove(self.at);
+    }
 }
 
 /// A marker that has been completed and can create preceding nodes
