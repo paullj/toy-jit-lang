@@ -1,11 +1,19 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{io, path::PathBuf, process::ExitCode};
 
 use clap::{
     Parser, Subcommand,
     builder::styling::{AnsiColor, Color, Style},
 };
+use codespan_reporting::{
+    files::SimpleFile,
+    term::{self, Config},
+};
 use lex::lex;
-use parse::parse;
+use parse::{
+    error::{AsDiagnostic, Issue},
+    parse,
+};
+use termcolor::WriteColor;
 
 /// a simple interpreter
 #[derive(Parser, Debug)]
@@ -54,9 +62,7 @@ fn main() -> ExitCode {
                     let (tree, errors) = parse(contents.as_str());
                     println!("{:#?}", tree);
 
-                    for ele in errors {
-                        eprintln!("{:?}", ele)
-                    }
+                    report_issues(&mut io::stderr(), source, errors);
                 }
             }
             return ExitCode::SUCCESS;
@@ -80,6 +86,23 @@ fn get_source_contents(source: &str) -> String {
     } else {
         source.to_string()
     }
+}
+
+pub fn report_issues(writer: &mut impl io::Write, source: &str, issues: Vec<Issue>) {
+    let mut buffer = termcolor::Buffer::ansi();
+    for issue in issues {
+        repor_issue(&mut buffer, source, issue);
+    }
+    writer
+        .write_all(buffer.as_slice())
+        .expect("failed to write to output");
+}
+
+pub fn repor_issue(writer: &mut impl WriteColor, source: &str, issue: Issue) {
+    let file = SimpleFile::new("<script>", source);
+    let config = Config::default();
+    let diagnostic = issue.as_diagnostic();
+    term::emit(writer, &config, &file, &diagnostic).expect("failed to write to output");
 }
 
 fn get_styles() -> clap::builder::Styles {

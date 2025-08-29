@@ -4,12 +4,13 @@ mod grammar;
 
 mod marker;
 pub mod parser;
+use error::Issue;
 pub use error::ParseError;
 use event::{Sink, Source};
 pub use parser::Parser;
 use syntax::SyntaxNode;
 
-pub fn parse(input: &str) -> (SyntaxNode, Vec<ParseError>) {
+pub fn parse(input: &str) -> (SyntaxNode, Vec<Issue>) {
     let source = Source::new(input);
     let parser = Parser::new(source);
 

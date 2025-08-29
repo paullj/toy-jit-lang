@@ -31,7 +31,7 @@ fn variable_statement(parser: &mut Parser) -> Option<CompletedMarker> {
         Some(variable_assignment(marker, parser))
     } else {
         marker.discard(parser);
-        parser.error(ParseError::UnexpectedToken);
+        parser.error(ParseError::UnexpectedTokenInVariableStatement);
         None
     }
 }

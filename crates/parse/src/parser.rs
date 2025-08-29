@@ -3,7 +3,7 @@ use std::mem;
 use lex::{Token, TokenKind};
 use syntax::SyntaxKind;
 
-use crate::error::ParseError;
+use crate::error::{Issue, ParseError};
 use crate::event::{Event, Source};
 
 use crate::grammar;
@@ -67,12 +67,18 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn error(&mut self, error: ParseError) {
-        let _found = self.source.peek();
-        let _expected = mem::take(&mut self.expected_kinds);
+        let found = match self.source.peek() {
+            Some(token) => token,
+            None => todo!("Handle end of input"),
+        };
+        let expected = mem::take(&mut self.expected_kinds);
 
-        eprintln!("Found {:?} but expected one of {:?}", _found, _expected);
-
-        self.events.push(Event::Error(error));
+        self.events.push(Event::Error(Issue {
+            expected,
+            found: Some(found.kind),
+            span: found.span.clone(),
+            kind: error,
+        }));
         if !self.is_at_one_of(&RECOVERABLE_KINDS) && !self.is_at_end() {
             let marker = self.start();
             self.consume();

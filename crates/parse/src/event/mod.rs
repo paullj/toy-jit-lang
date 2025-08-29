@@ -7,7 +7,7 @@ mod source;
 pub(crate) use sink::Sink;
 pub(crate) use source::Source;
 
-use crate::ParseError;
+use crate::{ParseError, error::Issue};
 
 #[derive(Debug, PartialEq)]
 pub enum Event<'a> {
@@ -15,5 +15,5 @@ pub enum Event<'a> {
     AddToken { token: Token<'a> },
     FinishNode,
     Placeholder,
-    Error(ParseError),
+    Error(Issue),
 }

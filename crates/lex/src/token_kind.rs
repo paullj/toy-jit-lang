@@ -1,4 +1,4 @@
-use std::fmt::{Display, write};
+use std::fmt::Display;
 
 use crate::error::Error;
 use logos::Logos;
