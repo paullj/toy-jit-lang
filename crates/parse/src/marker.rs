@@ -48,15 +48,15 @@ pub(crate) struct CompletedMarker {
 impl CompletedMarker {
     /// Creates a new marker that wraps this completed node
     pub(crate) fn precede(self, parser: &mut Parser) -> Marker {
-        let new_m = parser.start();
+        let new_marker = parser.start();
 
         // NOTE: Links the new marker to this completed one for precedence
         if let Event::StartNode { ref mut at, .. } = parser.events[self.at] {
-            *at = Some(new_m.at - self.at);
+            *at = Some(new_marker.at - self.at);
         } else {
             unreachable!();
         }
 
-        new_m
+        new_marker
     }
 }

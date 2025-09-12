@@ -53,10 +53,11 @@ pub(crate) fn inner_expression_with_binding_power(
                 break;
             }
 
-            // Eat the operator’s token.
             parser.consume();
 
             let marker = lhs.precede(parser);
+            // Eat the operator’s token.
+
             let parsed_rhs = expression_with_binding_power(parser, right_binding_power).is_some();
             lhs = marker.complete(parser, SyntaxKind::InfixExpression);
 
