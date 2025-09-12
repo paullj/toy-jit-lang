@@ -1,19 +1,11 @@
-use std::{io, path::PathBuf, process::ExitCode};
+use std::path::PathBuf;
 
 use clap::{
     Parser, Subcommand,
     builder::styling::{AnsiColor, Color, Style},
 };
-use codespan_reporting::{
-    files::SimpleFile,
-    term::{self, Config},
-};
 use lex::lex;
-use parse::{
-    error::{AsDiagnostic, Issue},
-    parse,
-};
-use termcolor::WriteColor;
+use parse::{ParseError, parse};
 
 /// a simple interpreter
 #[derive(Parser, Debug)]
@@ -23,7 +15,6 @@ struct Arguments {
     #[arg(value_name = "PATH", index = 1)]
     path: Option<PathBuf>,
 
-    #[cfg(debug_assertions)]
     #[command(subcommand)]
     cmd: Option<Commands>,
 }
@@ -31,14 +22,37 @@ struct Arguments {
 #[derive(Subcommand, Debug, Clone)]
 enum Commands {
     /// Lex source into tokens
+    #[cfg(debug_assertions)]
     #[command(name = "lex")]
-    Lex { source: String },
+    Lex {
+        source: String,
+    },
     /// Parse source into an AST
+    #[cfg(debug_assertions)]
     #[command(name = "parse")]
-    Parse { source: String },
+    Parse {
+        source: String,
+    },
+
+    Server,
 }
 
-fn main() -> ExitCode {
+use miette::{Diagnostic, Result};
+use thiserror::Error;
+
+#[derive(Diagnostic, Debug, Error)]
+#[diagnostic()]
+#[error("Multiple errors occurred")]
+pub struct MultiError {
+    // Note source code by no labels
+    #[source_code]
+    source_code: String,
+    // The source code above is used for these errors
+    #[related]
+    related: Vec<ParseError>,
+}
+
+fn main() -> Result<()> {
     let args = Arguments::parse();
 
     // Commands for testing lexing and parsing
@@ -54,19 +68,27 @@ fn main() -> ExitCode {
                         match result {
                             Ok(token) => println!("{}", token),
                             Err(err) => eprintln!("error: {:?}", err),
-                        }
+                        };
                     }
                 }
                 Commands::Parse { source } => {
                     let contents = get_source_contents(source);
-                    let (tree, errors) = parse(contents.as_str());
+                    let tree = parse(contents.as_str()).map_err(|errors| MultiError {
+                        source_code: contents.clone(),
+                        related: errors,
+                    })?;
+
                     println!("{:#?}", tree);
 
-                    report_issues(&mut io::stderr(), source, errors);
+                    let root = ast::Root::cast(tree).unwrap();
+
+                    println!("{:#?}", root.items().collect::<Vec<_>>());
+                    println!("{:#?}", hir::lower(root));
                 }
-            }
-            return ExitCode::SUCCESS;
-        }
+                Commands::Server => todo!(),
+            };
+            return Ok(());
+        };
     }
 
     match args.path {
@@ -77,7 +99,7 @@ fn main() -> ExitCode {
             eprintln!("Run REPL")
         }
     }
-    return ExitCode::SUCCESS;
+    return Ok(());
 }
 
 fn get_source_contents(source: &str) -> String {
@@ -86,23 +108,6 @@ fn get_source_contents(source: &str) -> String {
     } else {
         source.to_string()
     }
-}
-
-pub fn report_issues(writer: &mut impl io::Write, source: &str, issues: Vec<Issue>) {
-    let mut buffer = termcolor::Buffer::ansi();
-    for issue in issues {
-        repor_issue(&mut buffer, source, issue);
-    }
-    writer
-        .write_all(buffer.as_slice())
-        .expect("failed to write to output");
-}
-
-pub fn repor_issue(writer: &mut impl WriteColor, source: &str, issue: Issue) {
-    let file = SimpleFile::new("<script>", source);
-    let config = Config::default();
-    let diagnostic = issue.as_diagnostic();
-    term::emit(writer, &config, &file, &diagnostic).expect("failed to write to output");
 }
 
 fn get_styles() -> clap::builder::Styles {

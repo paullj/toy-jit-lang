@@ -27,13 +27,7 @@ pub(crate) fn item(parser: &mut Parser) -> Option<CompletedMarker> {
                 }
                 None => {
                     marker.discard(parser);
-                    parser.error_with_callback(|c| ParseError::ExpectedVariableItem {
-                        // TODO: Can we get rid of clone()?
-                        at: c.at.clone().into(),
-                        expected: c
-                            .one_of()
-                            .and_then(|a| Some(format!("Expected of one {}", a))),
-                    })
+                    parser.error_with_callback(|_| ParseError::UnexpectedToken)
                 }
             }
         }

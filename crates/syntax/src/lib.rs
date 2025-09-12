@@ -7,43 +7,45 @@ use num_traits::FromPrimitive;
 #[derive(Debug, Copy, Clone, PartialEq, FromPrimitive, ToPrimitive, Hash, PartialOrd, Eq, Ord)]
 #[repr(u16)]
 pub enum SyntaxKind {
-    Root = 0,
-
-    Error,
-
-    // Trivia tokens
-    Whitespace,
-    Comment,
-    EOL,
+    Error = 0,
 
     // Tokens
+    Whitespace,
+    Comment,
+    NewLine,
     LeftParenthesis,
     RightParenthesis,
+    LeftBrace,
+    RightBrace,
+    Comma,
     Plus,
     Minus,
     Asterisk,
     Slash,
     Equals,
     ColonEquals,
-
-    Echo,
-
     Integer,
     Identifier,
+    FunctionKeyword,
 
     // Nodes
+    Root,
     VariableDefinition,
     VariableAssignment,
     VariableReference,
-    InfixExpr,
+    InfixExpression,
     Literal,
-    ParenExpr,
-    PrefixExpr,
+    ParenthesisExpression,
+    PrefixExpression,
+    FunctionDeclaration,
+    ParameterList,
+    Parameter,
+    Block,
 }
 
 impl SyntaxKind {
     pub fn is_trivia(self) -> bool {
-        matches!(self, Self::Whitespace | Self::Comment | Self::EOL)
+        matches!(self, Self::Whitespace | Self::Comment | Self::NewLine)
     }
 }
 
@@ -58,18 +60,21 @@ impl From<TokenKind> for SyntaxKind {
         match value {
             TokenKind::Whitespace => SyntaxKind::Whitespace,
             TokenKind::Comment => SyntaxKind::Comment,
-            TokenKind::EOL => SyntaxKind::EOL,
+            TokenKind::NewLine => SyntaxKind::NewLine,
             TokenKind::Plus => SyntaxKind::Plus,
             TokenKind::Minus => SyntaxKind::Minus,
             TokenKind::Asterisk => SyntaxKind::Asterisk,
             TokenKind::Slash => SyntaxKind::Slash,
             TokenKind::ColonEquals => SyntaxKind::ColonEquals,
-            TokenKind::Echo => SyntaxKind::Echo,
             TokenKind::Identifier => SyntaxKind::Identifier,
             TokenKind::Integer => SyntaxKind::Integer,
             TokenKind::Equals => SyntaxKind::Equals,
             TokenKind::LeftParenthesis => SyntaxKind::LeftParenthesis,
             TokenKind::RightParenthesis => SyntaxKind::RightParenthesis,
+            TokenKind::LeftBrace => SyntaxKind::LeftBrace,
+            TokenKind::RightBrace => SyntaxKind::RightBrace,
+            TokenKind::Comma => SyntaxKind::Comma,
+            TokenKind::Function => SyntaxKind::FunctionKeyword,
         }
     }
 }

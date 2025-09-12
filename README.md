@@ -5,10 +5,15 @@ todo
 * parse, syntax tests
 * check expression parsing is actually correct
 
-* ast?
-* hir?
-* repl
+- ast
+- hir
 * type checking
+
+* lsp
+* tree sitter
+* vscode, zed extensions
+
+* repl
 
 goals
 * simple

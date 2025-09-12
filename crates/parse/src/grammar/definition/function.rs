@@ -1,11 +1,7 @@
 use lex::TokenKind;
 use syntax::SyntaxKind;
 
-use crate::{
-    ParseError, Parser,
-    grammar::{item, statement},
-    marker::CompletedMarker,
-};
+use crate::{ParseError, Parser, grammar::item, marker::CompletedMarker};
 
 pub(crate) fn function_definition(parser: &mut Parser) -> CompletedMarker {
     assert!(parser.is_at(TokenKind::Function));

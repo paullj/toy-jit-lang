@@ -11,19 +11,19 @@ pub enum TokenKind {
     #[regex("#.*")]
     Comment,
     #[regex(r"[\r\n]+")]
-    EOL,
+    NewLine,
 
     // Single-character tokens
     #[token("(")]
     LeftParenthesis,
     #[token(")")]
     RightParenthesis,
-    // #[token("{")]
-    // LeftBrace,
-    // #[token("}")]
-    // RightBrace,
-    // #[token(",")]
-    // Comma,
+    #[token("{")]
+    LeftBrace,
+    #[token("}")]
+    RightBrace,
+    #[token(",")]
+    Comma,
     // #[token(":")]
     // Colon,
     #[token("+")]
@@ -44,12 +44,10 @@ pub enum TokenKind {
     // RightArrow,
 
     // Keywords
-    // #[token("fn")]
-    // Fn,
+    #[token("fn")]
+    Function,
     // #[token("return")]
     // Return,
-    #[token("echo")]
-    Echo,
 
     // Literals
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
@@ -62,7 +60,7 @@ pub enum TokenKind {
 
 impl TokenKind {
     pub fn is_trivia(self) -> bool {
-        matches!(self, Self::Whitespace | Self::EOL | Self::Comment)
+        matches!(self, Self::Whitespace | Self::NewLine | Self::Comment)
     }
 }
 
@@ -71,18 +69,21 @@ impl Display for TokenKind {
         match self {
             TokenKind::Whitespace => write!(f, "whitespace"),
             TokenKind::Comment => write!(f, "#"),
-            TokenKind::EOL => write!(f, "newline"),
+            TokenKind::NewLine => write!(f, "newline"),
             TokenKind::Plus => write!(f, "+"),
             TokenKind::Minus => write!(f, "-"),
             TokenKind::Asterisk => write!(f, "*"),
             TokenKind::Slash => write!(f, "/"),
             TokenKind::ColonEquals => write!(f, ":="),
-            TokenKind::Echo => write!(f, "echo"),
             TokenKind::Identifier => write!(f, "identifier"),
             TokenKind::Integer => write!(f, "integer"),
             TokenKind::Equals => write!(f, "="),
             TokenKind::LeftParenthesis => write!(f, "("),
             TokenKind::RightParenthesis => write!(f, ")"),
+            TokenKind::LeftBrace => write!(f, "{{"),
+            TokenKind::RightBrace => write!(f, "}}"),
+            TokenKind::Comma => write!(f, ","),
+            TokenKind::Function => write!(f, "function"),
         }
     }
 }
@@ -96,7 +97,7 @@ mod tests {
     #[case(" ", TokenKind::Whitespace)]
     #[case("\t", TokenKind::Whitespace)]
     #[case("# comment", TokenKind::Comment)]
-    #[case("\n", TokenKind::EOL)]
+    #[case("\n", TokenKind::NewLine)]
     #[case("+", TokenKind::Plus)]
     #[case("-", TokenKind::Minus)]
     #[case("*", TokenKind::Asterisk)]
@@ -114,7 +115,7 @@ mod tests {
     #[rstest]
     #[case(TokenKind::Whitespace)]
     #[case(TokenKind::Comment)]
-    #[case(TokenKind::EOL)]
+    #[case(TokenKind::NewLine)]
     fn test_is_trivia(#[case] kind: TokenKind) {
         assert_eq!(kind.is_trivia(), true);
     }
@@ -122,7 +123,6 @@ mod tests {
     #[rstest]
     #[case(TokenKind::Identifier)]
     #[case(TokenKind::Integer)]
-    #[case(TokenKind::Echo)]
     fn test_is_not_trivia(#[case] kind: TokenKind) {
         assert_eq!(kind.is_trivia(), false);
     }
@@ -130,13 +130,12 @@ mod tests {
     #[rstest]
     #[case(TokenKind::Whitespace, "whitespace")]
     #[case(TokenKind::Comment, "#")]
-    #[case(TokenKind::EOL, "newline")]
+    #[case(TokenKind::NewLine, "newline")]
     #[case(TokenKind::Plus, "+")]
     #[case(TokenKind::Minus, "-")]
     #[case(TokenKind::Asterisk, "*")]
     #[case(TokenKind::Slash, "/")]
     #[case(TokenKind::ColonEquals, ":=")]
-    #[case(TokenKind::Echo, "echo")]
     #[case(TokenKind::Identifier, "identifier")]
     #[case(TokenKind::Integer, "integer")]
     fn test_token_kind_display(#[case] token_kind: TokenKind, #[case] expected: &str) {
