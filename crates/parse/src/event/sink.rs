@@ -1,13 +1,13 @@
 use lex::Token;
 use rowan::{GreenNode, GreenNodeBuilder};
 
-use crate::{ParseError, error::Issue, event::Event};
+use crate::{ParseError, event::Event};
 use syntax::SyntaxKind;
 
 /// Builds a concrete syntax tree from parsing events
 pub struct Sink {
     builder: GreenNodeBuilder<'static>,
-    errors: Vec<Issue>,
+    errors: Vec<ParseError>,
 }
 
 // TODO: Change this api to be a bit nicer
@@ -21,7 +21,7 @@ impl Sink {
     }
 
     /// Processes events to build the final syntax tree
-    pub fn build(mut self, events: Vec<Event>) -> (GreenNode, Vec<Issue>) {
+    pub fn build(mut self, events: Vec<Event>) -> (GreenNode, Vec<ParseError>) {
         for event in events {
             match event {
                 Event::StartNode { kind, at: _ } => {

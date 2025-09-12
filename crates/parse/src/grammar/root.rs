@@ -1,4 +1,3 @@
-use lex::TokenKind;
 use syntax::SyntaxKind;
 
 use crate::{Parser, marker::CompletedMarker};
@@ -9,8 +8,7 @@ pub(crate) fn root(parser: &mut Parser) -> CompletedMarker {
     let marker = parser.start();
 
     while !parser.is_at_end() {
-        statement(parser);
-        parser.expect(TokenKind::EOL, crate::ParseError::UnexpectedToken);
+        item(parser);
     }
 
     marker.complete(parser, SyntaxKind::Root)

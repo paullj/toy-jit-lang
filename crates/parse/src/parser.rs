@@ -1,13 +1,14 @@
 use std::mem;
+use std::ops::Range;
 
-use lex::{Token, TokenKind};
+use lex::TokenKind;
 use syntax::SyntaxKind;
 
-use crate::error::{Issue, ParseError};
+use crate::error::ParseError;
 use crate::event::{Event, Source};
 
 use crate::grammar;
-use crate::marker::Marker;
+use crate::marker::{CompletedMarker, Marker};
 
 const RECOVERABLE_KINDS: [TokenKind; 1] = [TokenKind::ColonEquals];
 
@@ -15,8 +16,33 @@ const RECOVERABLE_KINDS: [TokenKind; 1] = [TokenKind::ColonEquals];
 pub struct Parser<'a> {
     source: Source<'a>,
     pub(crate) events: Vec<Event<'a>>,
-    current_token: Option<Token<'a>>,
     expected_kinds: Vec<TokenKind>,
+}
+
+pub struct ErrorContext {
+    pub(crate) found: Option<TokenKind>,
+    pub(crate) at: Range<usize>,
+    pub(crate) expected: Vec<TokenKind>,
+}
+
+impl ErrorContext {
+    pub(crate) fn one_of(self) -> Option<String> {
+        let tokens: Vec<String> = self.expected.iter().map(|f| f.to_string()).collect();
+        let (token_last, tokens) = match tokens.split_last() {
+            Some((token_last, &[])) => return Some(token_last.to_string()),
+            Some((token_last, tokens)) => (token_last, tokens),
+            None => return None,
+        };
+
+        let mut output = String::new();
+        for token in tokens {
+            output.push_str(token);
+            output.push_str(", ");
+        }
+        output.push_str("or ");
+        output.push_str(token_last);
+        Some(output)
+    }
 }
 
 impl<'a> Parser<'a> {
@@ -24,7 +50,6 @@ impl<'a> Parser<'a> {
     pub fn new(source: Source<'a>) -> Self {
         Self {
             source,
-            current_token: None,
             events: Vec::new(),
             expected_kinds: Vec::new(),
         }
@@ -45,11 +70,21 @@ impl<'a> Parser<'a> {
     }
 
     /// Expects a specific token kind, consuming it or erroring
-    pub(crate) fn expect(&mut self, kind: TokenKind, or: ParseError) {
+    pub(crate) fn expect<F>(&mut self, kind: TokenKind, callback: F)
+    where
+        F: Fn(ErrorContext) -> ParseError,
+    {
         if self.is_at(kind) {
             self.consume();
         } else {
-            self.error(or);
+            self.error_with_callback(callback);
+        }
+    }
+
+    pub(crate) fn consume_trivia(&mut self) {
+        let next = self.source.next_trivia();
+        for trivia in next.trivia {
+            self.events.push(Event::AddToken { token: trivia });
         }
     }
 
@@ -66,23 +101,31 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn error(&mut self, error: ParseError) {
-        let found = match self.source.peek() {
-            Some(token) => token,
-            None => todo!("Handle end of input"),
+    pub(crate) fn error_with_callback<F>(&mut self, callback: F) -> Option<CompletedMarker>
+    where
+        F: Fn(ErrorContext) -> ParseError,
+    {
+        let (found, at) = match self.source.peek() {
+            Some(token) => (Some(token.kind), token.span.clone()),
+            None => (None, self.source.last_span()),
         };
         let expected = mem::take(&mut self.expected_kinds);
 
-        self.events.push(Event::Error(Issue {
+        let error = callback(ErrorContext {
+            found,
+            at,
             expected,
-            found: Some(found.kind),
-            span: found.span.clone(),
-            kind: error,
-        }));
-        if !self.is_at_one_of(&RECOVERABLE_KINDS) && !self.is_at_end() {
-            let marker = self.start();
-            self.consume();
-            marker.complete(self, SyntaxKind::Error);
+        });
+
+        self.events.push(Event::Error(error));
+
+        match self.is_at_one_of(&RECOVERABLE_KINDS) {
+            None if !self.is_at_end() => {
+                let marker = self.start();
+                self.consume();
+                Some(marker.complete(self, SyntaxKind::Error))
+            }
+            _ => None,
         }
     }
 
@@ -97,8 +140,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Checks if the current token matches one of the given kinds
-    pub(crate) fn is_at_one_of(&mut self, set: &[TokenKind]) -> bool {
-        self.source.peek().map_or(false, |t| set.contains(&t.kind))
+    pub(crate) fn is_at_one_of(&mut self, set: &[TokenKind]) -> Option<TokenKind> {
+        self.source
+            .peek()
+            .filter(|t| set.contains(&t.kind))
+            .map(|t| t.kind)
     }
 
     /// Checks if at end of input
