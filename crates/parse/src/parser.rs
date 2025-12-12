@@ -10,7 +10,14 @@ use crate::event::{Event, Source};
 use crate::grammar;
 use crate::marker::{CompletedMarker, Marker};
 
-const RECOVERABLE_KINDS: [TokenKind; 1] = [TokenKind::ColonEquals];
+const RECOVERABLE_KINDS: [TokenKind; 6] = [
+    TokenKind::ColonEquals, // Assignment operator
+    TokenKind::Function,    // Start of function
+    TokenKind::LeftBrace,   // Start of block
+    TokenKind::RightBrace,  // End of block
+    TokenKind::NewLine,     // Statement boundary
+    TokenKind::Identifier,  // Potential variable
+];
 
 /// Event-driven parser that converts tokens into parsing events
 pub struct Parser<'a> {
@@ -26,12 +33,12 @@ pub struct ErrorContext {
 }
 
 impl ErrorContext {
-    pub(crate) fn one_of(self) -> Option<String> {
+    pub(crate) fn one_of(&self) -> String {
         let tokens: Vec<String> = self.expected.iter().map(|f| f.to_string()).collect();
         let (token_last, tokens) = match tokens.split_last() {
-            Some((token_last, &[])) => return Some(token_last.to_string()),
+            Some((token_last, &[])) => return token_last.to_string(),
             Some((token_last, tokens)) => (token_last, tokens),
-            None => return None,
+            None => return "nothing".to_string(),
         };
 
         let mut output = String::new();
@@ -41,7 +48,11 @@ impl ErrorContext {
         }
         output.push_str("or ");
         output.push_str(token_last);
-        Some(output)
+        output
+    }
+
+    pub(crate) fn found_string(&self) -> Option<String> {
+        self.found.map(|kind| kind.to_string())
     }
 }
 
@@ -56,9 +67,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses the input and returns events and errors
-    pub fn parse(mut self) -> Vec<Event<'a>> {
+    pub fn parse(mut self) -> (Vec<Event<'a>>, Vec<lex::Error>) {
         grammar::root(&mut self);
-        self.events
+        let lexer_errors = self.source.take_pending_errors();
+        (self.events, lexer_errors)
     }
 
     /// Creates a marker for the start of a syntax node
@@ -151,4 +163,24 @@ impl<'a> Parser<'a> {
     pub(crate) fn is_at_end(&mut self) -> bool {
         self.source.peek().is_none()
     }
+
+    /// Creates a standard unexpected token error
+    pub(crate) fn unexpected_token_error(&mut self) -> Option<CompletedMarker> {
+        self.error_with_callback(|ctx| ParseError::UnexpectedToken {
+            at: ctx.at.clone().into(),
+            expected: ctx.one_of(),
+            found: ctx.found_string(),
+        })
+    }
+
+    /// Returns the current parser position for progress tracking
+    pub(crate) fn position(&mut self) -> usize {
+        if let Some(token) = self.source.peek() {
+            token.span.start
+        } else {
+            self.source.last_span().start
+        }
+    }
+
+
 }

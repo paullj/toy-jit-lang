@@ -26,7 +26,9 @@ impl<'a> Iterator for Lexer<'a> {
                 text: self.inner.slice(),
                 span: self.inner.span(),
             })),
-            Err(error) => Some(Err(error)),
+            Err(_) => Some(Err(Error::InvalidToken {
+                at: self.inner.span().into(),
+            })),
         }
     }
 }

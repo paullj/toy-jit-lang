@@ -1,16 +1,30 @@
-use std::ops::Range;
-
-use lex::TokenKind;
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug, PartialEq)]
 pub enum ParseError {
-    #[error("unexpected token")]
-    UnexpectedToken,
+    #[error("unexpected token, expected {expected}")]
+    #[diagnostic(code("parse:unexpected_token"))]
+    UnexpectedToken {
+        #[label("unexpected token")]
+        at: SourceSpan,
+        expected: String,
+        found: Option<String>,
+    },
 
-    #[error("e000")]
-    #[diagnostic(code(parse::expected_variable_item))]
+    #[error("missing parameter type annotation")]
+    #[diagnostic(code("parse:missing_parameter_type"))]
+    MissingParameterType {
+        #[label("parameter missing type annotation")]
+        at: SourceSpan,
+        #[help]
+        help: String,
+    },
+
+    #[error(
+        "expected a variable definition, assignment, or expression starting with a variable name"
+    )]
+    #[diagnostic(code("parse:expected_variable_item"))]
     ExpectedVariableItem {
         #[label("here")]
         at: SourceSpan,
@@ -19,26 +33,14 @@ pub enum ParseError {
     },
 }
 
-#[derive(Error, Diagnostic, Debug)]
-#[error("expected a variable definition, assignment, or expression starting with a variable name")]
-pub struct ExpectedVariableItem {
-    #[label("here")]
-    pub at: SourceSpan,
-}
-
-fn one_of(tokens: Vec<String>) -> String {
-    let (token_last, tokens) = match tokens.split_last() {
-        Some((token_last, &[])) => return token_last.to_string(),
-        Some((token_last, tokens)) => (token_last, tokens),
-        None => return "nothing".to_string(),
-    };
-
-    let mut output = String::new();
-    for token in tokens {
-        output.push_str(token);
-        output.push_str(", ");
+impl From<lex::Error> for ParseError {
+    fn from(lex_error: lex::Error) -> Self {
+        match lex_error {
+            lex::Error::InvalidToken { at } => ParseError::UnexpectedToken {
+                at,
+                expected: "valid token".to_string(),
+                found: Some("invalid character".to_string()),
+            },
+        }
     }
-    output.push_str("or ");
-    output.push_str(token_last);
-    output
 }

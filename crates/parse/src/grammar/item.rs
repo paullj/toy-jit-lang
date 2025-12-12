@@ -2,7 +2,7 @@ use lex::TokenKind;
 use syntax::SyntaxKind;
 
 use super::*;
-use crate::{ParseError, Parser, concat_kinds, marker::CompletedMarker};
+use crate::{Parser, concat_kinds, marker::CompletedMarker};
 
 pub(crate) const ITEM_KINDS: &[TokenKind] = concat_kinds!(DEFINITION_KINDS, EXPRESSION_LHS_KINDS);
 pub(crate) const ITEM_VARIABLE_KINDS: &[TokenKind] = concat_kinds!(
@@ -27,11 +27,11 @@ pub(crate) fn item(parser: &mut Parser) -> Option<CompletedMarker> {
                 }
                 None => {
                     marker.discard(parser);
-                    parser.error_with_callback(|_| ParseError::UnexpectedToken)
+                    parser.unexpected_token_error()
                 }
             }
         }
         Some(_) => statement(parser),
-        None => parser.error_with_callback(|_| ParseError::UnexpectedToken),
+        None => parser.unexpected_token_error(),
     }
 }

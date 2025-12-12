@@ -40,6 +40,7 @@ enum Commands {
 use miette::{Diagnostic, Result};
 use thiserror::Error;
 
+// FIXME: Probably need some sort of unified error return for all errors
 #[derive(Diagnostic, Debug, Error)]
 #[diagnostic()]
 #[error("Multiple errors occurred")]
@@ -73,17 +74,26 @@ fn main() -> Result<()> {
                 }
                 Commands::Parse { source } => {
                     let contents = get_source_contents(source);
-                    let tree = parse(contents.as_str()).map_err(|errors| MultiError {
-                        source_code: contents.clone(),
-                        related: errors,
-                    })?;
+                    let (tree, errors) = parse(contents.as_str());
 
                     println!("{:#?}", tree);
 
                     let root = ast::Root::cast(tree).unwrap();
 
                     println!("{:#?}", root.items().collect::<Vec<_>>());
-                    println!("{:#?}", hir::lower(root));
+
+                    let (items, context) = hir::lower(root);
+                    println!("{:#?}", items);
+
+                    if !errors.is_empty() {
+                        return Err(MultiError {
+                            source_code: contents,
+                            related: errors,
+                        }
+                        .into());
+                    }
+                    let inferred_items = infer::infer(items, context);
+                    println!("{:?}", inferred_items);
                 }
                 Commands::Server => todo!(),
             };
@@ -103,7 +113,8 @@ fn main() -> Result<()> {
 }
 
 fn get_source_contents(source: &str) -> String {
-    if PathBuf::from(source).exists() {
+    let path = PathBuf::from(source);
+    if path.is_file() {
         std::fs::read_to_string(source).unwrap()
     } else {
         source.to_string()

@@ -7,6 +7,7 @@ pub struct Source<'a> {
     lexer: Peekable<Lexer<'a>>,
     buffer: Vec<Token<'a>>,
     last_span: Range<usize>,
+    pending_errors: Vec<lex::Error>,
 }
 
 /// Wrapper that includes trivia tokens alongside the main token
@@ -22,22 +23,38 @@ impl<'a> Source<'a> {
             lexer: Lexer::new(source).peekable(),
             buffer: Vec::new(),
             last_span: source.len()..source.len(),
+            pending_errors: Vec::new(),
         }
     }
 
     fn internal_next(&mut self) -> Option<Token<'a>> {
         match self.lexer.next() {
-            Some(Ok(token)) => Some(token),
-            Some(Err(err)) => todo!("Handle unexpected tokens: {:?}", err),
+            Some(Ok(token)) => {
+                self.last_span = token.span.clone();
+                Some(token)
+            },
+            Some(Err(err)) => {
+                // Store the error for later reporting
+                self.pending_errors.push(err);
+                // Skip this invalid token and try the next one
+                self.internal_next()
+            },
             None => None,
         }
     }
 
     fn internal_peek(&mut self) -> Option<&Token<'a>> {
+        // Keep consuming error tokens until we find a valid token or reach end
+        while let Some(Err(_)) = self.lexer.peek() {
+            if let Some(Err(err)) = self.lexer.next() {
+                self.pending_errors.push(err);
+            }
+        }
+        
+        // Now peek should either be Some(Ok(token)) or None
         match self.lexer.peek() {
             Some(Ok(token)) => Some(token),
-            Some(Err(err)) => todo!("Handle unexpected tokens: {:?}", err),
-            None => None,
+            _ => None,
         }
     }
 
@@ -107,5 +124,10 @@ impl<'a> Source<'a> {
     /// Returns the last span of the source code
     pub(crate) fn last_span(&self) -> Range<usize> {
         self.last_span.clone()
+    }
+
+    /// Returns and clears any pending lexer errors
+    pub(crate) fn take_pending_errors(&mut self) -> Vec<lex::Error> {
+        std::mem::take(&mut self.pending_errors)
     }
 }

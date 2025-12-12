@@ -12,6 +12,7 @@ lex = { path = "../lex" }
 parse = { path = "../parse" }
 ast = { path = "../ast" }
 hir = { path = "../hir" }
+infer = { path = "../infer" }
 
 termcolor = "1.4.1"
 miette = { version = "7.6.0", features = ["fancy"] }

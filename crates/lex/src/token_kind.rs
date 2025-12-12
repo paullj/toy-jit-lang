@@ -24,8 +24,8 @@ pub enum TokenKind {
     RightBrace,
     #[token(",")]
     Comma,
-    // #[token(":")]
-    // Colon,
+    #[token(":")]
+    Colon,
     #[token("+")]
     Plus,
     #[token("-")]
@@ -40,8 +40,8 @@ pub enum TokenKind {
     // Multi-character tokens
     #[token(":=")]
     ColonEquals,
-    // #[token("->")]
-    // RightArrow,
+    #[token("->")]
+    RightArrow,
 
     // Keywords
     #[token("fn")]
@@ -62,6 +62,10 @@ impl TokenKind {
     pub fn is_trivia(self) -> bool {
         matches!(self, Self::Whitespace | Self::NewLine | Self::Comment)
     }
+
+    pub fn is_newline(self) -> bool {
+        matches!(self, Self::NewLine)
+    }
 }
 
 impl Display for TokenKind {
@@ -75,6 +79,7 @@ impl Display for TokenKind {
             TokenKind::Asterisk => write!(f, "*"),
             TokenKind::Slash => write!(f, "/"),
             TokenKind::ColonEquals => write!(f, ":="),
+            TokenKind::RightArrow => write!(f, "->"),
             TokenKind::Identifier => write!(f, "identifier"),
             TokenKind::Integer => write!(f, "integer"),
             TokenKind::Equals => write!(f, "="),
@@ -83,6 +88,7 @@ impl Display for TokenKind {
             TokenKind::LeftBrace => write!(f, "{{"),
             TokenKind::RightBrace => write!(f, "}}"),
             TokenKind::Comma => write!(f, ","),
+            TokenKind::Colon => write!(f, ":"),
             TokenKind::Function => write!(f, "function"),
         }
     }
@@ -103,7 +109,10 @@ mod tests {
     #[case("*", TokenKind::Asterisk)]
     #[case("/", TokenKind::Slash)]
     #[case(":=", TokenKind::ColonEquals)]
+    #[case("->", TokenKind::RightArrow)]
+    #[case(":", TokenKind::Colon)]
     #[case("identifier", TokenKind::Identifier)]
+    #[case("int", TokenKind::Identifier)]
     #[case("0", TokenKind::Integer)]
     fn test_single_token(#[case] input: &str, #[case] expected_kind: TokenKind) {
         let mut lexer = TokenKind::lexer(input);
@@ -136,6 +145,8 @@ mod tests {
     #[case(TokenKind::Asterisk, "*")]
     #[case(TokenKind::Slash, "/")]
     #[case(TokenKind::ColonEquals, ":=")]
+    #[case(TokenKind::RightArrow, "->")]
+    #[case(TokenKind::Colon, ":")]
     #[case(TokenKind::Identifier, "identifier")]
     #[case(TokenKind::Integer, "integer")]
     fn test_token_kind_display(#[case] token_kind: TokenKind, #[case] expected: &str) {

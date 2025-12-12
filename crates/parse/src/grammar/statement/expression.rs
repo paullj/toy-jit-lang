@@ -77,7 +77,7 @@ fn lhs(parser: &mut Parser) -> Option<CompletedMarker> {
         Some(TokenKind::Minus) => prefix_expression(parser),
         Some(TokenKind::LeftParenthesis) => Some(parenthesis_expression(parser)),
         Some(_) => unreachable!("Parser should only match on {:?}", &EXPRESSION_LHS_KINDS),
-        None => parser.error_with_callback(|_| ParseError::UnexpectedToken),
+        None => parser.unexpected_token_error(),
     }
 }
 
@@ -118,7 +118,11 @@ fn parenthesis_expression(parser: &mut Parser) -> CompletedMarker {
     let marker = parser.start();
     parser.consume();
     expression_with_binding_power(parser, 0);
-    parser.expect(TokenKind::RightParenthesis, |_| ParseError::UnexpectedToken);
+    parser.expect(TokenKind::RightParenthesis, |ctx| ParseError::UnexpectedToken {
+        at: ctx.at.clone().into(),
+        expected: "closing parenthesis ')'".to_string(),
+        found: ctx.found_string(),
+    });
 
     marker.complete(parser, SyntaxKind::ParenthesisExpression)
 }

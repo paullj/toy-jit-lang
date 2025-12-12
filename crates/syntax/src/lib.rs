@@ -18,12 +18,14 @@ pub enum SyntaxKind {
     LeftBrace,
     RightBrace,
     Comma,
+    Colon,
     Plus,
     Minus,
     Asterisk,
     Slash,
     Equals,
     ColonEquals,
+    RightArrow,
     Integer,
     Identifier,
     FunctionKeyword,
@@ -40,6 +42,8 @@ pub enum SyntaxKind {
     FunctionDeclaration,
     ParameterList,
     Parameter,
+    TypeAnnotation,
+    ReturnTypeAnnotation,
     Block,
 }
 
@@ -66,6 +70,7 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::Asterisk => SyntaxKind::Asterisk,
             TokenKind::Slash => SyntaxKind::Slash,
             TokenKind::ColonEquals => SyntaxKind::ColonEquals,
+            TokenKind::RightArrow => SyntaxKind::RightArrow,
             TokenKind::Identifier => SyntaxKind::Identifier,
             TokenKind::Integer => SyntaxKind::Integer,
             TokenKind::Equals => SyntaxKind::Equals,
@@ -74,7 +79,9 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::LeftBrace => SyntaxKind::LeftBrace,
             TokenKind::RightBrace => SyntaxKind::RightBrace,
             TokenKind::Comma => SyntaxKind::Comma,
+            TokenKind::Colon => SyntaxKind::Colon,
             TokenKind::Function => SyntaxKind::FunctionKeyword,
+
         }
     }
 }
