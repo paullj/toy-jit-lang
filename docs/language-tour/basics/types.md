@@ -23,7 +23,7 @@ Binary, octal, and hexadecimal integer literals are also supported:
 ```
 
 
-There are arithmetic operations available for `int` types that you would expect, such as addition, subtraction, multiplication, division, and modulus. 
+There are arithmetic operations available for `int` types that you would expect, such as addition, subtraction, multiplication, division, and modulus.
 
 ```toy
 10 + 5

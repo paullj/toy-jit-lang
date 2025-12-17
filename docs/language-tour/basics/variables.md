@@ -42,7 +42,7 @@ x = 10
 ```
 
 <!-- TODO: Make this syntax nicer to read, maybe not = but something else? > ~ | ! & -->
-<!-- 
+<!--
 # Constants
 
 Constants are values that cannot be changed once assigned. They are declared using a _similar_ syntax to variables, but use the `=!` operator instead of the `=` assignment operator.
@@ -62,5 +62,5 @@ Unlike variables, attempting to reassign a constant will result in a compile-tim
 ```toy
 x :=! 10
 x = 20  # This is not allowed!
-``` 
+```
 -->

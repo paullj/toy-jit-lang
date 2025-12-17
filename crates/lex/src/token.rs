@@ -12,7 +12,7 @@ pub struct Token<'a> {
     pub text: &'a str,
 }
 
-impl<'a> Display for Token<'a> {
+impl Display for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -31,8 +31,11 @@ mod tests {
 
     #[test]
     fn display() {
-        let token = Token { kind: TokenKind::Integer, span: 0..3, text: "123" };
+        let token = Token {
+            kind: TokenKind::Integer,
+            span: 0..3,
+            text: "123",
+        };
         assert!(format!("{token}").contains("integer"));
     }
 }
-

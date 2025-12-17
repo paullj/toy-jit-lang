@@ -76,6 +76,9 @@ mod tests {
 
     #[test]
     fn recovers_after_error() {
-        assert_eq!(kinds("a?b"), vec![TokenKind::Identifier, TokenKind::Identifier]);
+        assert_eq!(
+            kinds("a?b"),
+            vec![TokenKind::Identifier, TokenKind::Identifier]
+        );
     }
 }
