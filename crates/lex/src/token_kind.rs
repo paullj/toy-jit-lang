@@ -321,7 +321,7 @@ mod tests {
     #[case(TokenKind::Comment)]
     #[case(TokenKind::NewLine)]
     fn test_is_trivia(#[case] kind: TokenKind) {
-        assert_eq!(kind.is_trivia(), true);
+        assert!(kind.is_trivia());
     }
 
     #[rstest]
@@ -330,7 +330,7 @@ mod tests {
     #[case(TokenKind::Float)]
     #[case(TokenKind::String)]
     fn test_is_not_trivia(#[case] kind: TokenKind) {
-        assert_eq!(kind.is_trivia(), false);
+        assert!(!kind.is_trivia());
     }
 
     #[test]
