@@ -8,7 +8,7 @@ pub use lexer::Lexer;
 pub use token::Token;
 pub use token_kind::TokenKind;
 
-pub fn lex(input: &str) -> Vec<Result<Token, Error>> {
+pub fn lex(input: &str) -> Vec<Result<Token<'_>, Error>> {
     let lexer = Lexer::new(input);
     lexer.collect()
 }
