@@ -46,10 +46,28 @@ pub enum TokenKind {
     Asterisk,
     #[token("/")]
     Slash,
+    #[token("%")]
+    Percent,
+
+    // Float arithmetic operators
+    #[token("+.")]
+    PlusDot,
+    #[token("-.")]
+    MinusDot,
+    #[token("*.")]
+    AsteriskDot,
+    #[token("/.")]
+    SlashDot,
 
     // Comparison operators
     #[token("=")]
     Equals,
+    #[token("==")]
+    EqualsEquals,
+    #[token("!=")]
+    NotEquals,
+    #[token("!")]
+    Bang,
     #[token(">")]
     GreaterThan,
     #[token("<")]
@@ -58,6 +76,16 @@ pub enum TokenKind {
     GreaterThanOrEqual,
     #[token("<=")]
     LessThanOrEqual,
+
+    // Float comparison operators
+    #[token(">.")]
+    GreaterThanDot,
+    #[token("<.")]
+    LessThanDot,
+    #[token(">=.")]
+    GreaterThanOrEqualDot,
+    #[token("<=.")]
+    LessThanOrEqualDot,
 
     // Multi-character tokens
     #[token("->")]
@@ -147,11 +175,23 @@ impl Display for TokenKind {
             TokenKind::Minus => write!(f, "-"),
             TokenKind::Asterisk => write!(f, "*"),
             TokenKind::Slash => write!(f, "/"),
+            TokenKind::Percent => write!(f, "%"),
+            TokenKind::PlusDot => write!(f, "+."),
+            TokenKind::MinusDot => write!(f, "-."),
+            TokenKind::AsteriskDot => write!(f, "*."),
+            TokenKind::SlashDot => write!(f, "/."),
             TokenKind::Equals => write!(f, "="),
+            TokenKind::EqualsEquals => write!(f, "=="),
+            TokenKind::NotEquals => write!(f, "!="),
+            TokenKind::Bang => write!(f, "!"),
             TokenKind::GreaterThan => write!(f, ">"),
             TokenKind::LessThan => write!(f, "<"),
             TokenKind::GreaterThanOrEqual => write!(f, ">="),
             TokenKind::LessThanOrEqual => write!(f, "<="),
+            TokenKind::GreaterThanDot => write!(f, ">."),
+            TokenKind::LessThanDot => write!(f, "<."),
+            TokenKind::GreaterThanOrEqualDot => write!(f, ">=."),
+            TokenKind::LessThanOrEqualDot => write!(f, "<=."),
             TokenKind::RightArrow => write!(f, "->"),
             TokenKind::DotDot => write!(f, ".."),
             TokenKind::Function => write!(f, "fn"),
@@ -196,7 +236,11 @@ mod tests {
     #[case("-", TokenKind::Minus)]
     #[case("*", TokenKind::Asterisk)]
     #[case("/", TokenKind::Slash)]
+    #[case("%", TokenKind::Percent)]
     #[case("=", TokenKind::Equals)]
+    #[case("==", TokenKind::EqualsEquals)]
+    #[case("!=", TokenKind::NotEquals)]
+    #[case("!", TokenKind::Bang)]
     #[case(">", TokenKind::GreaterThan)]
     #[case("<", TokenKind::LessThan)]
     #[case(">=", TokenKind::GreaterThanOrEqual)]
@@ -207,6 +251,15 @@ mod tests {
     #[case(".", TokenKind::Dot)]
     #[case("|", TokenKind::Pipe)]
     #[case("_", TokenKind::Underscore)]
+    // Float operators
+    #[case("+.", TokenKind::PlusDot)]
+    #[case("-.", TokenKind::MinusDot)]
+    #[case("*.", TokenKind::AsteriskDot)]
+    #[case("/.", TokenKind::SlashDot)]
+    #[case(">.", TokenKind::GreaterThanDot)]
+    #[case("<.", TokenKind::LessThanDot)]
+    #[case(">=.", TokenKind::GreaterThanOrEqualDot)]
+    #[case("<=.", TokenKind::LessThanOrEqualDot)]
     // Brackets
     #[case("(", TokenKind::LeftParenthesis)]
     #[case(")", TokenKind::RightParenthesis)]
