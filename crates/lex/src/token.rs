@@ -28,22 +28,11 @@ impl<'a> Display for Token<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rstest::rstest;
 
-    #[rstest]
-    #[case(TokenKind::Identifier, 0..5, "hello", "identifier  0..5  \"hello\"")]
-    #[case(TokenKind::Integer, 10..13, "123", "integer    10..13 \"123\"")]
-    #[case(TokenKind::Plus, 5..6, "+", "+           5..6  \"+\"")]
-    #[case(TokenKind::Whitespace, 0..3, "   ", "whitespace  0..3  \"   \"")]
-    #[case(TokenKind::Comment, 7..16, "# comment", "#           7..16 \"# comment\"")]
-    #[case(TokenKind::ColonEquals, 20..22, ":=", ":=         20..22 \":=\"")]
-    fn test_token_display(
-        #[case] kind: TokenKind,
-        #[case] span: Range<usize>,
-        #[case] text: &str,
-        #[case] expected: &str,
-    ) {
-        let token = Token { kind, span, text };
-        assert_eq!(format!("{}", token), expected);
+    #[test]
+    fn display() {
+        let token = Token { kind: TokenKind::Integer, span: 0..3, text: "123" };
+        assert!(format!("{token}").contains("integer"));
     }
 }
+

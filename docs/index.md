@@ -4,6 +4,9 @@ A simple statically-typed programming and scripting language.
 
 It can be used for creating scripts, libraries, and applications.
 
+Inspired by go, rust, python, gleam, odin, and others.
+
+<!-- 
 ## Contents
 
 Learn the language step by step:
@@ -36,4 +39,4 @@ Learn the language step by step:
 
 3. [Standard Library](./standard-library/index.md) - Overview of standard library modules
     1. [Result](./standard-library/result.md) - Result type for error handling
-    2. [Option](./standard-library/option.md) - Option type for optional values
+    2. [Option](./standard-library/option.md) - Option type for optional values -->

@@ -38,31 +38,44 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
-    #[rstest]
-    #[case("x := 10", vec![TokenKind::Identifier, TokenKind::Whitespace, TokenKind::ColonEquals, TokenKind::Whitespace, TokenKind::Integer])]
-    #[case("a + b * c", vec![TokenKind::Identifier, TokenKind::Whitespace, TokenKind::Plus, TokenKind::Whitespace, TokenKind::Identifier, TokenKind::Whitespace, TokenKind::Asterisk, TokenKind::Whitespace, TokenKind::Identifier])]
-    fn test_expression(#[case] input: &str, #[case] expected_kinds: Vec<TokenKind>) {
-        let lexer = Lexer::new(input);
-        let kinds: Vec<TokenKind> = lexer
-            .map(|t| t.expect("unexpected error").kind)
-            .into_iter()
-            .collect();
+    fn kinds(input: &str) -> Vec<TokenKind> {
+        Lexer::new(input)
+            .filter_map(|r| r.ok())
+            .map(|t| t.kind)
+            .collect()
+    }
 
-        assert!(!kinds.is_empty(), "Expected at least one token result");
-        assert_eq!(kinds, expected_kinds);
+    fn spans(input: &str) -> Vec<std::ops::Range<usize>> {
+        Lexer::new(input)
+            .filter_map(|r| r.ok())
+            .map(|t| t.span)
+            .collect()
     }
 
     #[rstest]
-    #[case("?")]
-    fn test_unexpected_token(#[case] input: &str) {
-        let lexer = Lexer::new(input);
-        let results: Vec<Result<Token, Error>> = lexer.collect();
+    #[case("x := 10", &[TokenKind::Identifier, TokenKind::Whitespace, TokenKind::Colon, TokenKind::Equals, TokenKind::Whitespace, TokenKind::Integer])]
+    #[case("x: int = 10", &[TokenKind::Identifier, TokenKind::Colon, TokenKind::Whitespace, TokenKind::Identifier, TokenKind::Whitespace, TokenKind::Equals, TokenKind::Whitespace, TokenKind::Integer])]
+    #[case("fn add(a: int) -> int", &[TokenKind::Function, TokenKind::Whitespace, TokenKind::Identifier, TokenKind::LeftParenthesis, TokenKind::Identifier, TokenKind::Colon, TokenKind::Whitespace, TokenKind::Identifier, TokenKind::RightParenthesis, TokenKind::Whitespace, TokenKind::RightArrow, TokenKind::Whitespace, TokenKind::Identifier])]
+    fn lex_kinds(#[case] input: &str, #[case] expected: &[TokenKind]) {
+        assert_eq!(kinds(input), expected);
+    }
 
-        // Check that we have at least one result and that it contains an error
-        assert!(!results.is_empty(), "Expected at least one token result");
-        assert!(
-            results.iter().any(|result| result.is_err()),
-            "Expected at least one error in the results"
-        );
+    #[rstest]
+    #[case("a b", &[0..1, 1..2, 2..3])]
+    #[case(":=", &[0..1, 1..2])]
+    fn lex_spans(#[case] input: &str, #[case] expected: &[std::ops::Range<usize>]) {
+        assert_eq!(spans(input), expected);
+    }
+
+    #[test]
+    fn invalid_token_error() {
+        let results: Vec<_> = Lexer::new("a ? b").collect();
+        let err = results.iter().find_map(|r| r.as_ref().err());
+        assert_eq!(*err.unwrap(), Error::InvalidToken { at: (2..3).into() });
+    }
+
+    #[test]
+    fn recovers_after_error() {
+        assert_eq!(kinds("a?b"), vec![TokenKind::Identifier, TokenKind::Identifier]);
     }
 }

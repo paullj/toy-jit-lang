@@ -12,3 +12,15 @@ pub fn lex(input: &str) -> Vec<Result<Token, Error>> {
     let lexer = Lexer::new(input);
     lexer.collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lex_function() {
+        let tokens = lex("x := 1");
+        assert_eq!(tokens.len(), 6); // x, ws, :, =, ws, 1
+        assert!(tokens.iter().all(|r| r.is_ok()));
+    }
+}
