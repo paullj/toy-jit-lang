@@ -12,6 +12,8 @@ Underscores are allowed for better readability [^2], the following are all equiv
 1000000
 ```
 
+[^2]: Underscores can be placed anywhere between digits in a number literal to improve readability. They do not affect the actual value of the number.
+
 Binary, octal, and hexadecimal integer literals are also supported:
 
 ```toy
@@ -20,7 +22,6 @@ Binary, octal, and hexadecimal integer literals are also supported:
 0xA         # Hexadecimal
 ```
 
-[^2]: Underscores can be placed anywhere between digits in a number literal to improve readability. They do not affect the actual value of the number.
 
 There are arithmetic operations available for `int` types that you would expect, such as addition, subtraction, multiplication, division, and modulus. 
 
