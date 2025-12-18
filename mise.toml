@@ -1,0 +1,20 @@
+[tools]
+rust = "stable"
+"cargo:cargo-llvm-cov" = "latest"
+"cargo:cargo-nextest" = "latest"
+
+[tasks.check]
+description = "Run all checks"
+run = "prek run --all-files --skip lint --skip format"
+
+[tasks.test]
+description = "Run the tests"
+run = "cargo llvm-cov nextest"
+
+[tasks.lint]
+description = "Check lint issues"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.format]
+description = "Check formatting"
+run = "cargo fmt --all -- --check"
