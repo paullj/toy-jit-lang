@@ -402,6 +402,82 @@ mod tests {
     }
 
     // ========================================
+    // Parser termination tests
+    // ========================================
+
+    /// Parser must terminate on any input - no infinite loops
+    fn assert_terminates(input: &str) {
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let timeout = Duration::from_secs(1);
+
+        let (_tree, _errors) = parse(input);
+
+        assert!(
+            start.elapsed() < timeout,
+            "Parser took too long on input: {:?}",
+            input
+        );
+    }
+
+    #[test]
+    fn terminates_on_unrecognized_tokens() {
+        // RightParen not in EXPR_FIRST, triggers recovery
+        assert_terminates(")");
+        assert_terminates(")))");
+        assert_terminates(") ) )");
+    }
+
+    #[test]
+    fn terminates_on_operators_without_operands() {
+        assert_terminates("+");
+        assert_terminates("+ + +");
+        assert_terminates("==");
+        assert_terminates("and");
+    }
+
+    #[test]
+    fn terminates_on_many_errors() {
+        // Many consecutive error-inducing tokens
+        assert_terminates(&") ".repeat(100));
+        assert_terminates(&"+ ".repeat(100));
+        assert_terminates(&", ".repeat(100));
+    }
+
+    #[test]
+    fn terminates_on_deeply_nested_parens() {
+        let open = "(".repeat(50);
+        let close = ")".repeat(50);
+        assert_terminates(&format!("x := {open}1{close}"));
+    }
+
+    #[test]
+    fn terminates_on_unclosed_parens() {
+        assert_terminates(&"(".repeat(100));
+    }
+
+    #[test]
+    fn terminates_on_colons() {
+        // Colons alone aren't valid items
+        assert_terminates(":");
+        assert_terminates(":::");
+        assert_terminates(": : :");
+    }
+
+    #[test]
+    fn terminates_on_mixed_garbage() {
+        assert_terminates(") : = + ( , ==");
+        assert_terminates("x := ) y := (");
+    }
+
+    #[test]
+    fn terminates_on_empty() {
+        assert_terminates("");
+        assert_terminates("   ");
+        assert_terminates("\n\n\n");
+    }
+
+    // ========================================
     // Recovery tests
     // ========================================
 
