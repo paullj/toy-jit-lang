@@ -1,14 +1,15 @@
 use lex::TokenKind;
 use syntax::SyntaxKind;
 
-use crate::{ParseError, Parser, concat_kinds, marker::CompletedMarker};
+use crate::{Parser, TokenSet, marker::CompletedMarker};
 
 pub(crate) fn expression(parser: &mut Parser) -> Option<CompletedMarker> {
     expression_with_binding_power(parser, 0)
 }
 
-// All infix operators
-pub(crate) const EXPRESSION_OPERATOR_KINDS: &[TokenKind] = &[
+/// All infix operators (used for documentation)
+#[allow(dead_code)]
+const OPERATOR_SET: TokenSet = TokenSet::new(&[
     // Int arithmetic
     TokenKind::Plus,
     TokenKind::Minus,
@@ -35,154 +36,133 @@ pub(crate) const EXPRESSION_OPERATOR_KINDS: &[TokenKind] = &[
     // Boolean
     TokenKind::And,
     TokenKind::Or,
-];
+]);
 
-// All tokens that can start an expression (literals, identifiers, prefix ops, parens)
-pub(crate) const EXPRESSION_LHS_KINDS: &[TokenKind] = &[
-    // Literals - integers
+/// Literal tokens
+const LITERAL_SET: TokenSet = TokenSet::new(&[
     TokenKind::Integer,
     TokenKind::BinaryInteger,
     TokenKind::OctalInteger,
     TokenKind::HexInteger,
-    // Literals - floats
     TokenKind::Float,
     TokenKind::FloatExponent,
-    // Literals - booleans
     TokenKind::True,
     TokenKind::False,
-    // Literals - strings
     TokenKind::String,
     TokenKind::MultiLineString,
-    // Identifiers
-    TokenKind::Identifier,
-    // Prefix operators
-    TokenKind::Minus,
-    TokenKind::Bang,
-    // Grouping
-    TokenKind::LeftParenthesis,
-];
+]);
 
-pub(crate) const EXPRESSION_KINDS: &[TokenKind] =
-    concat_kinds!(EXPRESSION_LHS_KINDS, EXPRESSION_OPERATOR_KINDS);
+/// Prefix operators
+const PREFIX_SET: TokenSet = TokenSet::new(&[TokenKind::Minus, TokenKind::Bang]);
 
-fn expression_with_binding_power(
-    parser: &mut Parser,
-    minimum_binding_power: u8,
-) -> Option<CompletedMarker> {
-    let lhs = lhs(parser)?;
+/// All tokens that can start an expression
+pub(crate) const EXPR_FIRST: TokenSet = LITERAL_SET
+    .union(TokenSet::single(TokenKind::Identifier))
+    .union(PREFIX_SET)
+    .union(TokenSet::single(TokenKind::LeftParenthesis));
 
-    inner_expression_with_binding_power(parser, lhs, minimum_binding_power)
+/// Recovery set for expression parsing (skip to newline or expr start)
+const EXPR_RECOVERY: TokenSet = EXPR_FIRST.union(TokenSet::single(TokenKind::NewLine));
+
+fn expression_with_binding_power(p: &mut Parser, min_bp: u8) -> Option<CompletedMarker> {
+    let lhs = lhs(p)?;
+    inner_expression_with_binding_power(p, lhs, min_bp)
 }
 
 pub(crate) fn inner_expression_with_binding_power(
-    parser: &mut Parser,
+    p: &mut Parser,
     mut lhs: CompletedMarker,
-    minimum_binding_power: u8,
+    min_bp: u8,
 ) -> Option<CompletedMarker> {
-    loop {
-        let Some(op): Option<Operator> = parser
-            .is_at_one_of(EXPRESSION_OPERATOR_KINDS)
-            .and_then(|kind| kind.try_into().ok())
-        else {
-            // We're not at an operator; we don't know what to do next, so we return and let the
-            // caller decide.
+    while let Some(kind) = p.current() {
+        // Check for operator
+        let Ok(op) = Operator::try_from(kind) else {
             break;
         };
 
-        if let Some((left_binding_power, right_binding_power)) = op.infix_binding_power() {
-            if left_binding_power < minimum_binding_power {
-                break;
-            }
+        let Some((l_bp, r_bp)) = op.infix_binding_power() else {
+            break;
+        };
+        if l_bp < min_bp {
+            break;
+        }
 
-            parser.consume();
+        p.consume(); // eat operator
 
-            let marker = lhs.precede(parser);
-            // Eat the operator's token.
+        let marker = lhs.precede(p);
+        let parsed_rhs = expression_with_binding_power(p, r_bp).is_some();
+        lhs = marker.complete(p, SyntaxKind::InfixExpression);
 
-            let parsed_rhs = expression_with_binding_power(parser, right_binding_power).is_some();
-            lhs = marker.complete(parser, SyntaxKind::InfixExpression);
-
-            if !parsed_rhs {
-                break;
-            }
+        if !parsed_rhs {
+            // Recovery: skip to expr start
+            p.recover("expected expression", EXPR_RECOVERY);
+            break;
         }
     }
 
     Some(lhs)
 }
 
-fn lhs(parser: &mut Parser) -> Option<CompletedMarker> {
-    match parser.is_at_one_of(EXPRESSION_LHS_KINDS) {
-        // Integer literals
-        Some(TokenKind::Integer)
-        | Some(TokenKind::BinaryInteger)
-        | Some(TokenKind::OctalInteger)
-        | Some(TokenKind::HexInteger) => Some(literal(parser)),
-        // Float literals
-        Some(TokenKind::Float) | Some(TokenKind::FloatExponent) => Some(literal(parser)),
-        // Boolean literals
-        Some(TokenKind::True) | Some(TokenKind::False) => Some(literal(parser)),
-        // String literals
-        Some(TokenKind::String) | Some(TokenKind::MultiLineString) => Some(literal(parser)),
-        // Identifiers
-        Some(TokenKind::Identifier) => Some(variable_reference(parser)),
-        // Prefix operators
-        Some(TokenKind::Minus) | Some(TokenKind::Bang) => prefix_expression(parser),
-        // Parenthesized expressions
-        Some(TokenKind::LeftParenthesis) => Some(parenthesis_expression(parser)),
-        Some(_) => unreachable!("Parser should only match on EXPRESSION_LHS_KINDS"),
-        None => parser.unexpected_token_error(),
+fn lhs(p: &mut Parser) -> Option<CompletedMarker> {
+    match p.current() {
+        Some(k) if LITERAL_SET.contains(k) => Some(literal(p)),
+        Some(TokenKind::Identifier) => Some(variable_reference(p)),
+        Some(TokenKind::Minus) | Some(TokenKind::Bang) => prefix_expression(p),
+        Some(TokenKind::LeftParenthesis) => Some(parenthesis_expression(p)),
+        _ => {
+            p.recover("expected expression", EXPR_RECOVERY);
+            None
+        }
     }
 }
 
-fn literal(parser: &mut Parser) -> CompletedMarker {
-    let marker = parser.start();
-    parser.consume();
-    marker.complete(parser, SyntaxKind::Literal)
+fn literal(p: &mut Parser) -> CompletedMarker {
+    let m = p.start();
+    p.consume();
+    m.complete(p, SyntaxKind::Literal)
 }
 
-fn variable_reference(parser: &mut Parser) -> CompletedMarker {
-    assert!(parser.is_at(TokenKind::Identifier));
-
-    let marker = parser.start();
-    parser.consume();
-    marker.complete(parser, SyntaxKind::VariableReference)
+fn variable_reference(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::Identifier));
+    let m = p.start();
+    p.consume();
+    m.complete(p, SyntaxKind::VariableReference)
 }
 
-fn prefix_expression(parser: &mut Parser) -> Option<CompletedMarker> {
-    let op = match parser.is_at_one_of(&[TokenKind::Minus, TokenKind::Bang]) {
+fn prefix_expression(p: &mut Parser) -> Option<CompletedMarker> {
+    let op = match p.current() {
         Some(TokenKind::Minus) => Operator::Minus,
         Some(TokenKind::Bang) => Operator::Bang,
         _ => return None,
     };
 
-    if let Some(((), right_binding_power)) = op.prefix_binding_power() {
-        let marker = parser.start();
-        // Eat the operator's token.
-        parser.consume();
+    let ((), r_bp) = op.prefix_binding_power()?;
 
-        expression_with_binding_power(parser, right_binding_power);
-        Some(marker.complete(parser, SyntaxKind::PrefixExpression))
-    } else {
-        None
-    }
+    let m = p.start();
+    p.consume(); // eat operator
+    expression_with_binding_power(p, r_bp);
+    Some(m.complete(p, SyntaxKind::PrefixExpression))
 }
 
-fn parenthesis_expression(parser: &mut Parser) -> CompletedMarker {
-    assert!(parser.is_at(TokenKind::LeftParenthesis));
+fn parenthesis_expression(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::LeftParenthesis));
 
-    let marker = parser.start();
-    parser.consume();
-    expression_with_binding_power(parser, 0);
-    parser.expect(TokenKind::RightParenthesis, |ctx| {
-        ParseError::UnexpectedToken {
-            at: ctx.at.clone().into(),
-            expected: "closing parenthesis ')'".to_string(),
-            found: ctx.found_string(),
-        }
-    });
+    let m = p.start();
+    p.consume(); // eat '('
+    expression_with_binding_power(p, 0);
 
-    marker.complete(parser, SyntaxKind::ParenthesisExpression)
+    if !p.eat(TokenKind::RightParenthesis) {
+        // IDE-friendly: emit error but still complete the node
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "')'".to_string(),
+            found,
+        });
+    }
+
+    m.complete(p, SyntaxKind::ParenthesisExpression)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

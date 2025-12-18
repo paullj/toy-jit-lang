@@ -1,42 +1,45 @@
 use syntax::SyntaxKind;
 
-use crate::{Parser, marker::CompletedMarker};
+use crate::{Parser, TokenSet, marker::CompletedMarker};
+use lex::TokenKind;
 
 use super::*;
 
 const MAX_PARSE_ITERATIONS: usize = 10_000;
 
-pub(crate) fn root(parser: &mut Parser) -> CompletedMarker {
-    let marker = parser.start();
+/// Recovery for root level - skip to newline or identifier
+const ROOT_RECOVERY: TokenSet = TokenSet::new(&[TokenKind::NewLine, TokenKind::Identifier]);
 
+pub(crate) fn root(p: &mut Parser) -> CompletedMarker {
+    let m = p.start();
     let mut iterations = 0;
 
-    while !parser.is_at_end() {
-        let position_before = parser.position();
-        item(parser);
-        let position_after = parser.position();
+    while !p.is_at_end() {
+        let pos_before = p.position();
+        item(p);
+        let pos_after = p.position();
         iterations += 1;
 
-        // Check if we made progress - if position didn't change, we're stuck
-        if position_before == position_after {
-            // No progress made, create error and advance one token to prevent infinite loop
-            if let Some(_error_marker) = parser.unexpected_token_error() {
-                // Error marker created and token consumed, continue
-            } else {
-                // No error recovery happened, we need to break to avoid infinite loop
-                break;
-            }
+        // No progress - skip token to prevent infinite loop
+        if pos_before == pos_after
+            && p.recover("unexpected token", ROOT_RECOVERY).is_none()
+            && !p.is_at_end()
+        {
+            // Still stuck, force consume
+            p.consume();
         }
 
         if iterations > MAX_PARSE_ITERATIONS {
-            parser.error_with_callback(|ctx| crate::ParseError::UnexpectedToken {
-                at: ctx.at.clone().into(),
-                expected: "end of input or valid item".to_string(),
-                found: ctx.found_string(),
+            let span = p.current_span();
+            let found = p.current().map(|k| k.to_string());
+            p.error(crate::ParseError::UnexpectedToken {
+                at: span.into(),
+                expected: "end of input".to_string(),
+                found,
             });
             break;
         }
     }
 
-    marker.complete(parser, SyntaxKind::Root)
+    m.complete(p, SyntaxKind::Root)
 }

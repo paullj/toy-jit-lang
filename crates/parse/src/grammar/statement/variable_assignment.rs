@@ -7,10 +7,9 @@ use crate::{
     marker::{CompletedMarker, Marker},
 };
 
-pub(crate) fn variable_assignment(parser: &mut Parser, marker: Marker) -> CompletedMarker {
-    assert!(parser.is_at(TokenKind::Equals));
-
-    parser.consume();
-    expression(parser);
-    marker.complete(parser, SyntaxKind::VariableAssignment)
+pub(crate) fn variable_assignment(p: &mut Parser, m: Marker) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::Equals));
+    p.consume();
+    expression(p);
+    m.complete(p, SyntaxKind::VariableAssignment)
 }

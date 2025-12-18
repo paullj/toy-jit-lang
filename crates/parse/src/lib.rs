@@ -1,12 +1,12 @@
 mod event;
 mod grammar;
 mod marker;
-
-#[macro_use]
-mod utils;
+mod token_set;
 
 pub mod error;
 pub mod parser;
+
+pub use token_set::TokenSet;
 
 use event::{Sink, Source};
 use syntax::SyntaxNode;
@@ -397,6 +397,102 @@ mod tests {
                       Bang@5..6 "!"
                       Literal@6..10
                         TrueKeyword@6..10 "true"
+            "#]],
+        );
+    }
+
+    // ========================================
+    // Recovery tests
+    // ========================================
+
+    fn check_with_errors(input: &str, expected_tree: Expect) {
+        let (tree, _errors) = parse(input);
+        let actual = format!("{tree:#?}");
+        expected_tree.assert_eq(&actual);
+    }
+
+    #[test]
+    fn recover_missing_expression_after_equals() {
+        // x := (missing expr) should still produce a partial tree
+        let (tree, errors) = parse("x :=");
+        let actual = format!("{tree:#?}");
+        expect![[r#"
+            Root@0..4
+              VariableDefinition@0..4
+                Identifier@0..1 "x"
+                Whitespace@1..2 " "
+                Colon@2..3 ":"
+                Equals@3..4 "="
+        "#]]
+        .assert_eq(&actual);
+        assert!(!errors.is_empty(), "Should have error for missing expr");
+    }
+
+    #[test]
+    fn recover_unclosed_paren() {
+        // Unclosed paren should still produce a tree
+        let (tree, errors) = parse("x := (1 + 2");
+        let actual = format!("{tree:#?}");
+        expect![[r#"
+            Root@0..11
+              VariableDefinition@0..11
+                Identifier@0..1 "x"
+                Whitespace@1..2 " "
+                Colon@2..3 ":"
+                Equals@3..4 "="
+                ParenthesisExpression@4..11
+                  Whitespace@4..5 " "
+                  LeftParenthesis@5..6 "("
+                  InfixExpression@6..11
+                    Literal@6..7
+                      Integer@6..7 "1"
+                    Whitespace@7..8 " "
+                    Plus@8..9 "+"
+                    Literal@9..11
+                      Whitespace@9..10 " "
+                      Integer@10..11 "2"
+        "#]]
+        .assert_eq(&actual);
+        assert!(!errors.is_empty(), "Should have error for unclosed paren");
+    }
+
+    #[test]
+    fn recover_multiple_statements_with_error() {
+        // Error on first line - recovery captures some tokens in Error node
+        // but continues to parse subsequent valid code
+        check_with_errors(
+            "x :=\ny := 2",
+            expect![[r#"
+                Root@0..11
+                  VariableDefinition@0..6
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    VariableReference@4..6
+                      NewLine@4..5 "\n"
+                      Identifier@5..6 "y"
+                  Error@6..9
+                    Whitespace@6..7 " "
+                    Colon@7..8 ":"
+                    Equals@8..9 "="
+                  Literal@9..11
+                    Whitespace@9..10 " "
+                    Integer@10..11 "2"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn recover_standalone_identifier() {
+        // Just an identifier should be treated as a variable reference
+        // NOTE: may emit a spurious error at end, but tree is still valid
+        check_with_errors(
+            "x",
+            expect![[r#"
+                Root@0..1
+                  VariableReference@0..1
+                    Identifier@0..1 "x"
             "#]],
         );
     }

@@ -1,4 +1,3 @@
-use std::mem;
 use std::ops::Range;
 
 use lex::TokenKind;
@@ -6,51 +5,15 @@ use syntax::SyntaxKind;
 
 use crate::error::ParseError;
 use crate::event::{Event, Source};
+use crate::token_set::TokenSet;
 
 use crate::grammar;
 use crate::marker::{CompletedMarker, Marker};
-
-const RECOVERABLE_KINDS: [TokenKind; 3] = [
-    TokenKind::Colon,      // Variable declaration
-    TokenKind::NewLine,    // Statement boundary
-    TokenKind::Identifier, // Potential variable
-];
 
 /// Event-driven parser that converts tokens into parsing events
 pub struct Parser<'a> {
     source: Source<'a>,
     pub(crate) events: Vec<Event<'a>>,
-    expected_kinds: Vec<TokenKind>,
-}
-
-pub struct ErrorContext {
-    pub(crate) found: Option<TokenKind>,
-    pub(crate) at: Range<usize>,
-    pub(crate) expected: Vec<TokenKind>,
-}
-
-impl ErrorContext {
-    pub(crate) fn one_of(&self) -> String {
-        let tokens: Vec<String> = self.expected.iter().map(|f| f.to_string()).collect();
-        let (token_last, tokens) = match tokens.split_last() {
-            Some((token_last, &[])) => return token_last.to_string(),
-            Some((token_last, tokens)) => (token_last, tokens),
-            None => return "nothing".to_string(),
-        };
-
-        let mut output = String::new();
-        for token in tokens {
-            output.push_str(token);
-            output.push_str(", ");
-        }
-        output.push_str("or ");
-        output.push_str(token_last);
-        output
-    }
-
-    pub(crate) fn found_string(&self) -> Option<String> {
-        self.found.map(|kind| kind.to_string())
-    }
 }
 
 impl<'a> Parser<'a> {
@@ -59,7 +22,6 @@ impl<'a> Parser<'a> {
         Self {
             source,
             events: Vec::new(),
-            expected_kinds: Vec::new(),
         }
     }
 
@@ -74,87 +36,18 @@ impl<'a> Parser<'a> {
     pub(crate) fn start(&mut self) -> Marker {
         let pos = self.events.len();
         self.events.push(Event::Placeholder);
-
         Marker::new(pos)
-    }
-
-    /// Expects a specific token kind, consuming it or erroring
-    pub(crate) fn expect<F>(&mut self, kind: TokenKind, callback: F)
-    where
-        F: Fn(ErrorContext) -> ParseError,
-    {
-        if self.is_at(kind) {
-            self.consume();
-        } else {
-            self.error_with_callback(callback);
-        }
-    }
-
-    #[allow(dead_code)] // Reserved for future use
-    pub(crate) fn consume_trivia(&mut self) {
-        let next = self.source.next_trivia();
-        for trivia in next.trivia {
-            self.events.push(Event::AddToken { token: trivia });
-        }
     }
 
     /// Consumes the next token and its trivia
     pub(crate) fn consume(&mut self) {
-        self.expected_kinds.clear();
         let next = self.source.next();
         for trivia in next.trivia {
             self.events.push(Event::AddToken { token: trivia });
         }
-
         if let Some(token) = next.token {
             self.events.push(Event::AddToken { token });
         }
-    }
-
-    pub(crate) fn error_with_callback<F>(&mut self, callback: F) -> Option<CompletedMarker>
-    where
-        F: Fn(ErrorContext) -> ParseError,
-    {
-        let (found, at) = match self.source.peek() {
-            Some(token) => (Some(token.kind), token.span.clone()),
-            None => (None, self.source.last_span()),
-        };
-        let expected = mem::take(&mut self.expected_kinds);
-
-        let error = callback(ErrorContext {
-            found,
-            at,
-            expected,
-        });
-
-        self.events.push(Event::Error(error));
-
-        match self.is_at_one_of(&RECOVERABLE_KINDS) {
-            None if !self.is_at_end() => {
-                let marker = self.start();
-                self.consume();
-                Some(marker.complete(self, SyntaxKind::Error))
-            }
-            _ => None,
-        }
-    }
-
-    /// Checks if the current token matches the given kind
-    pub(crate) fn is_at(&mut self, kind: TokenKind) -> bool {
-        self.expected_kinds.push(kind);
-        if let Some(token) = self.source.peek() {
-            token.kind == kind
-        } else {
-            false
-        }
-    }
-
-    /// Checks if the current token matches one of the given kinds
-    pub(crate) fn is_at_one_of(&mut self, set: &[TokenKind]) -> Option<TokenKind> {
-        self.source
-            .peek()
-            .filter(|t| set.contains(&t.kind))
-            .map(|t| t.kind)
     }
 
     /// Checks if at end of input
@@ -162,21 +55,96 @@ impl<'a> Parser<'a> {
         self.source.peek().is_none()
     }
 
-    /// Creates a standard unexpected token error
-    pub(crate) fn unexpected_token_error(&mut self) -> Option<CompletedMarker> {
-        self.error_with_callback(|ctx| ParseError::UnexpectedToken {
-            at: ctx.at.clone().into(),
-            expected: ctx.one_of(),
-            found: ctx.found_string(),
-        })
-    }
-
     /// Returns the current parser position for progress tracking
     pub(crate) fn position(&mut self) -> usize {
-        if let Some(token) = self.source.peek() {
-            token.span.start
+        self.source
+            .peek()
+            .map(|t| t.span.start)
+            .unwrap_or_else(|| self.source.last_span().start)
+    }
+
+    /// Check if current token matches kind
+    pub(crate) fn at(&mut self, kind: TokenKind) -> bool {
+        self.source.peek().is_some_and(|t| t.kind == kind)
+    }
+
+    /// Check if current token is in the set
+    pub(crate) fn at_set(&mut self, set: TokenSet) -> bool {
+        self.source.peek().is_some_and(|t| set.contains(t.kind))
+    }
+
+    /// Returns current token kind without consuming
+    pub(crate) fn current(&mut self) -> Option<TokenKind> {
+        self.source.peek().map(|t| t.kind)
+    }
+
+    /// Returns current span
+    pub(crate) fn current_span(&mut self) -> Range<usize> {
+        self.source
+            .peek()
+            .map(|t| t.span.clone())
+            .unwrap_or_else(|| self.source.last_span())
+    }
+
+    /// Consume token if it matches, returns whether consumed
+    pub(crate) fn eat(&mut self, kind: TokenKind) -> bool {
+        if self.at(kind) {
+            self.consume();
+            true
         } else {
-            self.source.last_span().start
+            false
         }
+    }
+
+    /// Emit a parse error directly
+    pub(crate) fn error(&mut self, error: ParseError) {
+        self.events.push(Event::Error(error));
+    }
+
+    /// Consume if matches, else emit error with message
+    pub(crate) fn expect(&mut self, kind: TokenKind, msg: &str) -> bool {
+        if self.eat(kind) {
+            true
+        } else {
+            let span = self.current_span();
+            let found = self.current().map(|k| k.to_string());
+            self.error(ParseError::UnexpectedToken {
+                at: span.into(),
+                expected: msg.to_string(),
+                found,
+            });
+            false
+        }
+    }
+
+    /// Recover by skipping tokens until recovery set, wrapping skipped in Error node
+    pub(crate) fn recover(&mut self, msg: &str, recovery: TokenSet) -> Option<CompletedMarker> {
+        // Don't skip if already at recovery point or end
+        if self.at_set(recovery) || self.is_at_end() {
+            let span = self.current_span();
+            let found = self.current().map(|k| k.to_string());
+            self.error(ParseError::UnexpectedToken {
+                at: span.into(),
+                expected: msg.to_string(),
+                found,
+            });
+            return None;
+        }
+
+        // Wrap skipped tokens in single Error node
+        let span = self.current_span();
+        let found = self.current().map(|k| k.to_string());
+        let marker = self.start();
+        self.error(ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: msg.to_string(),
+            found,
+        });
+
+        while !self.at_set(recovery) && !self.is_at_end() {
+            self.consume();
+        }
+
+        Some(marker.complete(self, SyntaxKind::Error))
     }
 }

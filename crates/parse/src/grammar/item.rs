@@ -2,44 +2,46 @@ use lex::TokenKind;
 use syntax::SyntaxKind;
 
 use super::*;
-use crate::{Parser, concat_kinds, marker::CompletedMarker};
+use crate::{Parser, TokenSet, marker::CompletedMarker};
 
-pub(crate) const ITEM_KINDS: &[TokenKind] = concat_kinds!(DEFINITION_KINDS, EXPRESSION_LHS_KINDS);
-pub(crate) const ITEM_VARIABLE_KINDS: &[TokenKind] =
-    concat_kinds!(&[TokenKind::Colon, TokenKind::Equals], EXPRESSION_KINDS);
+/// Recovery set for item-level parsing
+const ITEM_RECOVERY: TokenSet = EXPR_FIRST
+    .union(TokenSet::single(TokenKind::NewLine))
+    .union(TokenSet::single(TokenKind::Identifier));
 
-pub(crate) fn item(parser: &mut Parser) -> Option<CompletedMarker> {
-    match parser.is_at_one_of(ITEM_KINDS) {
-        // NOTE: Special case for handling identifiers since we do not have a dedicated keyword for defining variables
+pub(crate) fn item(p: &mut Parser) -> Option<CompletedMarker> {
+    match p.current() {
         Some(TokenKind::Identifier) => {
-            let marker = parser.start();
-            parser.consume();
+            let m = p.start();
+            p.consume();
 
-            match parser.is_at_one_of(ITEM_VARIABLE_KINDS) {
+            match p.current() {
                 Some(TokenKind::Colon) => {
-                    // Consume the ':'
-                    parser.consume();
-
-                    if parser.is_at(TokenKind::Equals) {
+                    p.consume(); // eat ':'
+                    if p.at(TokenKind::Equals) {
                         // x := expr (type inference)
-                        Some(variable_definition_inferred(parser, marker))
+                        Some(variable_definition_inferred(p, m))
                     } else {
                         // x: Type = expr (explicit type)
-                        Some(variable_definition_typed(parser, marker))
+                        Some(variable_definition_typed(p, m))
                     }
                 }
-                Some(TokenKind::Equals) => Some(variable_assignment(parser, marker)),
-                Some(_) => {
-                    let lhs = marker.complete(parser, SyntaxKind::VariableReference);
-                    inner_expression_with_binding_power(parser, lhs, 0)
+                Some(TokenKind::Equals) => Some(variable_assignment(p, m)),
+                Some(k) if EXPR_FIRST.contains(k) => {
+                    // Identifier followed by expr token -> treat as expression
+                    let lhs = m.complete(p, SyntaxKind::VariableReference);
+                    inner_expression_with_binding_power(p, lhs, 0)
                 }
-                None => {
-                    marker.discard(parser);
-                    parser.unexpected_token_error()
+                _ => {
+                    // Just an identifier on its own -> variable reference
+                    Some(m.complete(p, SyntaxKind::VariableReference))
                 }
             }
         }
-        Some(_) => statement(parser),
-        None => parser.unexpected_token_error(),
+        Some(k) if EXPR_FIRST.contains(k) => statement(p),
+        _ => {
+            p.recover("expected item", ITEM_RECOVERY);
+            None
+        }
     }
 }
