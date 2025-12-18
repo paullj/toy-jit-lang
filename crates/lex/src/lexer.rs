@@ -55,7 +55,6 @@ mod tests {
     #[rstest]
     #[case("x := 10", &[TokenKind::Identifier, TokenKind::Whitespace, TokenKind::Colon, TokenKind::Equals, TokenKind::Whitespace, TokenKind::Integer])]
     #[case("x: int = 10", &[TokenKind::Identifier, TokenKind::Colon, TokenKind::Whitespace, TokenKind::Identifier, TokenKind::Whitespace, TokenKind::Equals, TokenKind::Whitespace, TokenKind::Integer])]
-    #[case("fn add(a: int) -> int", &[TokenKind::Function, TokenKind::Whitespace, TokenKind::Identifier, TokenKind::LeftParenthesis, TokenKind::Identifier, TokenKind::Colon, TokenKind::Whitespace, TokenKind::Identifier, TokenKind::RightParenthesis, TokenKind::Whitespace, TokenKind::RightArrow, TokenKind::Whitespace, TokenKind::Identifier])]
     fn lex_kinds(#[case] input: &str, #[case] expected: &[TokenKind]) {
         assert_eq!(kinds(input), expected);
     }

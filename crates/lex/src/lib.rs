@@ -18,7 +18,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lex_function() {
+    fn lex_variable_definition() {
         let tokens = lex("x := 1");
         assert_eq!(tokens.len(), 6); // x, ws, :, =, ws, 1
         assert!(tokens.iter().all(|r| r.is_ok()));

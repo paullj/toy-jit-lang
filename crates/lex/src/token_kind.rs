@@ -18,24 +18,10 @@ pub enum TokenKind {
     LeftParenthesis,
     #[token(")")]
     RightParenthesis,
-    #[token("{")]
-    LeftBrace,
-    #[token("}")]
-    RightBrace,
-    #[token("[")]
-    LeftBracket,
-    #[token("]")]
-    RightBracket,
     #[token(",")]
     Comma,
     #[token(":")]
     Colon,
-    #[token(".")]
-    Dot,
-    #[token("|")]
-    Pipe,
-    #[token("_")]
-    Underscore,
 
     // Arithmetic operators
     #[token("+")]
@@ -87,37 +73,11 @@ pub enum TokenKind {
     #[token("<=.")]
     LessThanOrEqualDot,
 
-    // Multi-character tokens
-    #[token("->")]
-    RightArrow,
-    #[token("..")]
-    DotDot,
-
     // Keywords
-    #[token("fn")]
-    Function,
-    #[token("if")]
-    If,
-    #[token("else")]
-    Else,
-    #[token("for")]
-    For,
-    #[token("while")]
-    While,
-    #[token("loop")]
-    Loop,
-    #[token("break")]
-    Break,
-    #[token("match")]
-    Match,
-    #[token("in")]
-    In,
     #[token("and")]
     And,
     #[token("or")]
     Or,
-    #[token("type")]
-    Type,
     #[token("true")]
     True,
     #[token("false")]
@@ -162,15 +122,8 @@ impl Display for TokenKind {
             TokenKind::NewLine => write!(f, "newline"),
             TokenKind::LeftParenthesis => write!(f, "("),
             TokenKind::RightParenthesis => write!(f, ")"),
-            TokenKind::LeftBrace => write!(f, "{{"),
-            TokenKind::RightBrace => write!(f, "}}"),
-            TokenKind::LeftBracket => write!(f, "["),
-            TokenKind::RightBracket => write!(f, "]"),
             TokenKind::Comma => write!(f, ","),
             TokenKind::Colon => write!(f, ":"),
-            TokenKind::Dot => write!(f, "."),
-            TokenKind::Pipe => write!(f, "|"),
-            TokenKind::Underscore => write!(f, "_"),
             TokenKind::Plus => write!(f, "+"),
             TokenKind::Minus => write!(f, "-"),
             TokenKind::Asterisk => write!(f, "*"),
@@ -192,20 +145,8 @@ impl Display for TokenKind {
             TokenKind::LessThanDot => write!(f, "<."),
             TokenKind::GreaterThanOrEqualDot => write!(f, ">=."),
             TokenKind::LessThanOrEqualDot => write!(f, "<=."),
-            TokenKind::RightArrow => write!(f, "->"),
-            TokenKind::DotDot => write!(f, ".."),
-            TokenKind::Function => write!(f, "fn"),
-            TokenKind::If => write!(f, "if"),
-            TokenKind::Else => write!(f, "else"),
-            TokenKind::For => write!(f, "for"),
-            TokenKind::While => write!(f, "while"),
-            TokenKind::Loop => write!(f, "loop"),
-            TokenKind::Break => write!(f, "break"),
-            TokenKind::Match => write!(f, "match"),
-            TokenKind::In => write!(f, "in"),
             TokenKind::And => write!(f, "and"),
             TokenKind::Or => write!(f, "or"),
-            TokenKind::Type => write!(f, "type"),
             TokenKind::True => write!(f, "true"),
             TokenKind::False => write!(f, "false"),
             TokenKind::Identifier => write!(f, "identifier"),
@@ -245,12 +186,7 @@ mod tests {
     #[case("<", TokenKind::LessThan)]
     #[case(">=", TokenKind::GreaterThanOrEqual)]
     #[case("<=", TokenKind::LessThanOrEqual)]
-    #[case("->", TokenKind::RightArrow)]
-    #[case("..", TokenKind::DotDot)]
     #[case(":", TokenKind::Colon)]
-    #[case(".", TokenKind::Dot)]
-    #[case("|", TokenKind::Pipe)]
-    #[case("_", TokenKind::Underscore)]
     // Float operators
     #[case("+.", TokenKind::PlusDot)]
     #[case("-.", TokenKind::MinusDot)]
@@ -263,24 +199,10 @@ mod tests {
     // Brackets
     #[case("(", TokenKind::LeftParenthesis)]
     #[case(")", TokenKind::RightParenthesis)]
-    #[case("{", TokenKind::LeftBrace)]
-    #[case("}", TokenKind::RightBrace)]
-    #[case("[", TokenKind::LeftBracket)]
-    #[case("]", TokenKind::RightBracket)]
     #[case(",", TokenKind::Comma)]
     // Keywords
-    #[case("fn", TokenKind::Function)]
-    #[case("if", TokenKind::If)]
-    #[case("else", TokenKind::Else)]
-    #[case("for", TokenKind::For)]
-    #[case("while", TokenKind::While)]
-    #[case("loop", TokenKind::Loop)]
-    #[case("break", TokenKind::Break)]
-    #[case("match", TokenKind::Match)]
-    #[case("in", TokenKind::In)]
     #[case("and", TokenKind::And)]
     #[case("or", TokenKind::Or)]
-    #[case("type", TokenKind::Type)]
     #[case("true", TokenKind::True)]
     #[case("false", TokenKind::False)]
     // Identifiers
