@@ -10,13 +10,10 @@ use crate::event::{Event, Source};
 use crate::grammar;
 use crate::marker::{CompletedMarker, Marker};
 
-const RECOVERABLE_KINDS: [TokenKind; 6] = [
-    TokenKind::ColonEquals, // Assignment operator
-    TokenKind::Function,    // Start of function
-    TokenKind::LeftBrace,   // Start of block
-    TokenKind::RightBrace,  // End of block
-    TokenKind::NewLine,     // Statement boundary
-    TokenKind::Identifier,  // Potential variable
+const RECOVERABLE_KINDS: [TokenKind; 3] = [
+    TokenKind::Colon,      // Variable declaration
+    TokenKind::NewLine,    // Statement boundary
+    TokenKind::Identifier, // Potential variable
 ];
 
 /// Event-driven parser that converts tokens into parsing events
@@ -93,6 +90,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[allow(dead_code)] // Reserved for future use
     pub(crate) fn consume_trivia(&mut self) {
         let next = self.source.next_trivia();
         for trivia in next.trivia {
@@ -181,6 +179,4 @@ impl<'a> Parser<'a> {
             self.source.last_span().start
         }
     }
-
-
 }

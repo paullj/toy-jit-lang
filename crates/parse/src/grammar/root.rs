@@ -10,7 +10,7 @@ pub(crate) fn root(parser: &mut Parser) -> CompletedMarker {
     let marker = parser.start();
 
     let mut iterations = 0;
-    
+
     while !parser.is_at_end() {
         let position_before = parser.position();
         item(parser);
@@ -29,12 +29,10 @@ pub(crate) fn root(parser: &mut Parser) -> CompletedMarker {
         }
 
         if iterations > MAX_PARSE_ITERATIONS {
-            parser.error_with_callback(|ctx| {
-                crate::ParseError::UnexpectedToken {
-                    at: ctx.at.clone().into(),
-                    expected: "end of input or valid item".to_string(),
-                    found: ctx.found_string(),
-                }
+            parser.error_with_callback(|ctx| crate::ParseError::UnexpectedToken {
+                at: ctx.at.clone().into(),
+                expected: "end of input or valid item".to_string(),
+                found: ctx.found_string(),
             });
             break;
         }

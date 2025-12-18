@@ -32,13 +32,13 @@ impl<'a> Source<'a> {
             Some(Ok(token)) => {
                 self.last_span = token.span.clone();
                 Some(token)
-            },
+            }
             Some(Err(err)) => {
                 // Store the error for later reporting
                 self.pending_errors.push(err);
                 // Skip this invalid token and try the next one
                 self.internal_next()
-            },
+            }
             None => None,
         }
     }
@@ -50,7 +50,7 @@ impl<'a> Source<'a> {
                 self.pending_errors.push(err);
             }
         }
-        
+
         // Now peek should either be Some(Ok(token)) or None
         match self.lexer.peek() {
             Some(Ok(token)) => Some(token),
@@ -93,6 +93,7 @@ impl<'a> Source<'a> {
         }
     }
 
+    #[allow(dead_code)] // Reserved for future use
     pub(crate) fn next_trivia(&mut self) -> WithTrivia<'a, Token<'a>> {
         self.consume_trivia();
 

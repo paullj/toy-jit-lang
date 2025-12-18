@@ -1,3 +1,5 @@
+#![allow(unused_assignments)] // Fields used by derive macros
+
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
@@ -10,15 +12,6 @@ pub enum ParseError {
         at: SourceSpan,
         expected: String,
         found: Option<String>,
-    },
-
-    #[error("missing parameter type annotation")]
-    #[diagnostic(code("parse:missing_parameter_type"))]
-    MissingParameterType {
-        #[label("parameter missing type annotation")]
-        at: SourceSpan,
-        #[help]
-        help: String,
     },
 
     #[error(

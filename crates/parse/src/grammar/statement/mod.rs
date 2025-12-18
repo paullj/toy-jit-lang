@@ -13,7 +13,7 @@ use lex::TokenKind;
 const STATEMENT_KINDS: &[TokenKind] = concat_kinds!(&[TokenKind::Identifier], EXPRESSION_LHS_KINDS);
 
 pub(crate) fn statement(parser: &mut Parser) -> Option<CompletedMarker> {
-    match parser.is_at_one_of(&STATEMENT_KINDS) {
+    match parser.is_at_one_of(STATEMENT_KINDS) {
         Some(TokenKind::Identifier) => {
             let marker = parser.start();
             Some(variable_assignment(parser, marker))
