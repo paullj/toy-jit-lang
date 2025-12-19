@@ -75,6 +75,11 @@ pub(crate) fn inner_expression_with_binding_power(
     min_bp: u8,
 ) -> Option<CompletedMarker> {
     while let Some(kind) = p.current() {
+        // Newline terminates expression (unless inside delimiters)
+        if p.at_newline_terminator() {
+            break;
+        }
+
         // Check for operator
         let Ok(op) = Operator::try_from(kind) else {
             break;
@@ -88,6 +93,20 @@ pub(crate) fn inner_expression_with_binding_power(
         }
 
         p.consume(); // eat operator
+
+        // After operator, check if newline terminates (trailing operator error)
+        if p.at_newline_terminator() {
+            let span = p.current_span();
+            let found = p.current().map(|k| k.to_string());
+            p.error(crate::ParseError::UnexpectedToken {
+                at: span.into(),
+                expected: "expression after operator".to_string(),
+                found,
+            });
+            // Complete partial infix expression
+            lhs = lhs.precede(p).complete(p, SyntaxKind::InfixExpression);
+            break;
+        }
 
         let marker = lhs.precede(p);
         let parsed_rhs = expression_with_binding_power(p, r_bp).is_some();
@@ -149,8 +168,11 @@ fn parenthesis_expression(p: &mut Parser) -> CompletedMarker {
 
     let m = p.start();
     p.consume(); // eat '('
+    p.enter_delimiter(); // newlines allowed inside parens
+
     expression_with_binding_power(p, 0);
 
+    p.exit_delimiter();
     if !p.eat(TokenKind::RightParenthesis) {
         // IDE-friendly: emit error but still complete the node
         let span = p.current_span();

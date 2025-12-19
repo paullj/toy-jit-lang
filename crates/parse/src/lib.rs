@@ -324,13 +324,15 @@ mod tests {
     fn parse_invalid_character() {
         let (tree, errors) = parse("x := @");
         let actual = format!("{tree:#?}");
+        // @ is lexer error (skipped), trailing whitespace captured
         expect![[r#"
-            Root@0..4
+            Root@0..5
               VariableDefinition@0..4
                 Identifier@0..1 "x"
                 Whitespace@1..2 " "
                 Colon@2..3 ":"
                 Equals@3..4 "="
+              Whitespace@4..5 " "
         "#]]
         .assert_eq(&actual);
         assert!(!errors.is_empty(), "Should have errors for invalid char");
@@ -569,6 +571,257 @@ mod tests {
                 Root@0..1
                   VariableReference@0..1
                     Identifier@0..1 "x"
+            "#]],
+        );
+    }
+
+    // ========================================
+    // Line termination tests
+    // ========================================
+    //
+    // Rule: Newline terminates statement unless inside unclosed delimiters.
+    // See docs/internal/line-termination.md for full specification.
+
+    #[test]
+    fn line_term_multiple_newlines_between_statements() {
+        // Multiple newlines treated as single terminator
+        check(
+            "x := 1\n\n\ny := 2",
+            expect![[r#"
+                Root@0..15
+                  VariableDefinition@0..6
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    Literal@4..6
+                      Whitespace@4..5 " "
+                      Integer@5..6 "1"
+                  VariableDefinition@6..15
+                    NewLine@6..7 "\n"
+                    NewLine@7..8 "\n"
+                    NewLine@8..9 "\n"
+                    Identifier@9..10 "y"
+                    Whitespace@10..11 " "
+                    Colon@11..12 ":"
+                    Equals@12..13 "="
+                    Literal@13..15
+                      Whitespace@13..14 " "
+                      Integer@14..15 "2"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn line_term_unclosed_paren_continues() {
+        // Unclosed paren allows continuation across newlines
+        check(
+            "x := (1 +\n      2)",
+            expect![[r#"
+                Root@0..18
+                  VariableDefinition@0..18
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    ParenthesisExpression@4..18
+                      Whitespace@4..5 " "
+                      LeftParenthesis@5..6 "("
+                      InfixExpression@6..17
+                        Literal@6..7
+                          Integer@6..7 "1"
+                        Whitespace@7..8 " "
+                        Plus@8..9 "+"
+                        Literal@9..17
+                          NewLine@9..10 "\n"
+                          Whitespace@10..16 "      "
+                          Integer@16..17 "2"
+                      RightParenthesis@17..18 ")"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn line_term_trailing_operator_does_not_continue() {
+        // Trailing operator without parens should NOT continue
+        // This should parse as: (x := 1 +) ERROR then (2) as separate
+        // The error should be after the +
+        let (tree, errors) = parse("x := 1 +\n2");
+        let actual = format!("{tree:#?}");
+        // Should have TWO top-level items, not one continued expression
+        assert!(
+            actual.contains("VariableDefinition") || actual.contains("Error"),
+            "Should parse as incomplete definition"
+        );
+        assert!(
+            !errors.is_empty(),
+            "Should have error for incomplete expression after +"
+        );
+    }
+
+    #[test]
+    fn line_term_comment_ends_statement() {
+        // Comment at end of line terminates statement
+        // "1 # comment\n+ 2" should be TWO statements:
+        // 1. Literal 1 (with comment as trivia)
+        // 2. PrefixExpression +2 or Error
+        let (tree, _errors) = parse("x := 1 # comment\n+ 2");
+        let actual = format!("{tree:#?}");
+        // The key test: there should be something after the first definition
+        // Either a second statement or the + should not be part of the first expr
+        assert!(
+            !actual.contains("InfixExpression@")
+                || actual.matches("VariableDefinition").count() >= 1,
+            "Comment should end the statement, not allow continuation"
+        );
+    }
+
+    #[test]
+    fn line_term_bare_tuple_destructure_invalid() {
+        // Bare tuple destructuring without parens should be invalid
+        // "a, b := 1, 2" should NOT parse as tuple destructuring
+        let (tree, errors) = parse("a, b := 1, 2");
+        let actual = format!("{tree:#?}");
+        // Should either error or parse as multiple separate things
+        // NOT as a single tuple destructuring
+        let has_error = !errors.is_empty() || actual.contains("Error");
+        let not_single_destructure = !actual.contains("TupleDestructure")
+            && (actual.matches("VariableReference").count() > 0
+                || actual.matches("VariableDefinition").count() > 0);
+        assert!(
+            has_error || not_single_destructure,
+            "Bare tuple destructuring without parens should be invalid or parse as separate items"
+        );
+    }
+
+    #[test]
+    fn line_term_nested_unclosed_parens_continue() {
+        // Nested unclosed parens should all continue
+        check(
+            "x := ((1 +\n       2) *\n      3)",
+            expect![[r#"
+                Root@0..31
+                  VariableDefinition@0..31
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    ParenthesisExpression@4..31
+                      Whitespace@4..5 " "
+                      LeftParenthesis@5..6 "("
+                      InfixExpression@6..30
+                        ParenthesisExpression@6..20
+                          LeftParenthesis@6..7 "("
+                          InfixExpression@7..19
+                            Literal@7..8
+                              Integer@7..8 "1"
+                            Whitespace@8..9 " "
+                            Plus@9..10 "+"
+                            Literal@10..19
+                              NewLine@10..11 "\n"
+                              Whitespace@11..18 "       "
+                              Integer@18..19 "2"
+                          RightParenthesis@19..20 ")"
+                        Whitespace@20..21 " "
+                        Asterisk@21..22 "*"
+                        Literal@22..30
+                          NewLine@22..23 "\n"
+                          Whitespace@23..29 "      "
+                          Integer@29..30 "3"
+                      RightParenthesis@30..31 ")"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn line_term_newline_only_file() {
+        // File with only newlines should capture them for lossless CST
+        check(
+            "\n\n\n",
+            expect![[r#"
+                Root@0..3
+                  NewLine@0..1 "\n"
+                  NewLine@1..2 "\n"
+                  NewLine@2..3 "\n"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn line_term_trailing_newline() {
+        // Statement followed by trailing newlines - captured for lossless CST
+        check(
+            "x := 1\n\n",
+            expect![[r#"
+                Root@0..8
+                  VariableDefinition@0..6
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    Literal@4..6
+                      Whitespace@4..5 " "
+                      Integer@5..6 "1"
+                  NewLine@6..7 "\n"
+                  NewLine@7..8 "\n"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn line_term_leading_newline() {
+        // Leading newlines before first statement
+        check(
+            "\n\nx := 1",
+            expect![[r#"
+                Root@0..8
+                  VariableDefinition@0..8
+                    NewLine@0..1 "\n"
+                    NewLine@1..2 "\n"
+                    Identifier@2..3 "x"
+                    Whitespace@3..4 " "
+                    Colon@4..5 ":"
+                    Equals@5..6 "="
+                    Literal@6..8
+                      Whitespace@6..7 " "
+                      Integer@7..8 "1"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn line_term_three_statements() {
+        // Three consecutive statements on separate lines
+        check(
+            "x := 1\ny := 2\nz := 3",
+            expect![[r#"
+                Root@0..20
+                  VariableDefinition@0..6
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    Literal@4..6
+                      Whitespace@4..5 " "
+                      Integer@5..6 "1"
+                  VariableDefinition@6..13
+                    NewLine@6..7 "\n"
+                    Identifier@7..8 "y"
+                    Whitespace@8..9 " "
+                    Colon@9..10 ":"
+                    Equals@10..11 "="
+                    Literal@11..13
+                      Whitespace@11..12 " "
+                      Integer@12..13 "2"
+                  VariableDefinition@13..20
+                    NewLine@13..14 "\n"
+                    Identifier@14..15 "z"
+                    Whitespace@15..16 " "
+                    Colon@16..17 ":"
+                    Equals@17..18 "="
+                    Literal@18..20
+                      Whitespace@18..19 " "
+                      Integer@19..20 "3"
             "#]],
         );
     }

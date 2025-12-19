@@ -14,6 +14,9 @@ use crate::marker::{CompletedMarker, Marker};
 pub struct Parser<'a> {
     source: Source<'a>,
     pub(crate) events: Vec<Event<'a>>,
+    /// Depth of unclosed delimiters (parens, brackets, braces)
+    /// When > 0, newlines don't terminate statements
+    delimiter_depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -22,6 +25,7 @@ impl<'a> Parser<'a> {
         Self {
             source,
             events: Vec::new(),
+            delimiter_depth: 0,
         }
     }
 
@@ -115,6 +119,30 @@ impl<'a> Parser<'a> {
             });
             false
         }
+    }
+
+    /// Consume any remaining trivia at EOF (for lossless CST)
+    pub(crate) fn consume_trailing_trivia(&mut self) {
+        let trailing = self.source.next_trivia();
+        for trivia in trailing.trivia {
+            self.events.push(Event::AddToken { token: trivia });
+        }
+    }
+
+    /// Enter a delimiter (paren, bracket, brace) - newlines won't terminate inside
+    pub(crate) fn enter_delimiter(&mut self) {
+        self.delimiter_depth += 1;
+    }
+
+    /// Exit a delimiter
+    pub(crate) fn exit_delimiter(&mut self) {
+        self.delimiter_depth = self.delimiter_depth.saturating_sub(1);
+    }
+
+    /// Check if at a newline that should terminate the statement
+    /// Returns true if there's a newline before the next token AND we're not inside delimiters
+    pub(crate) fn at_newline_terminator(&mut self) -> bool {
+        self.delimiter_depth == 0 && self.source.has_newline_before_next()
     }
 
     /// Recover by skipping tokens until recovery set, wrapping skipped in Error node

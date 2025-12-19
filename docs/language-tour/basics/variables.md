@@ -28,11 +28,11 @@ x := 5
 
 > [!IMPORTANT]
 > In practice, most code will use the `:=` operator for variable declaration since its easier to read and leverages type inference.
-
-You can also declare multiple variables in a single line:
+<!-- TODO: Move this into wherever we talk about tuples -->
+You can also declare multiple variables using tuple destructuring:
 
 ```toy
-x, y  := 10, 20
+(x, y) := (10, 20)
 ```
 
 Assigning to an existing variable is done with just the `=` operator:

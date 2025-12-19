@@ -131,4 +131,12 @@ impl<'a> Source<'a> {
     pub(crate) fn take_pending_errors(&mut self) -> Vec<lex::Error> {
         std::mem::take(&mut self.pending_errors)
     }
+
+    /// Check if there's a newline in pending trivia (before next non-trivia token)
+    pub(crate) fn has_newline_before_next(&mut self) -> bool {
+        self.consume_trivia();
+        self.buffer
+            .iter()
+            .any(|t| t.kind == lex::TokenKind::NewLine)
+    }
 }

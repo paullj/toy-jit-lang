@@ -22,5 +22,8 @@ pub(crate) fn root(p: &mut Parser) -> CompletedMarker {
         }
     }
 
+    // Capture any trailing trivia (newlines, comments, whitespace) at EOF
+    p.consume_trailing_trivia();
+
     m.complete(p, SyntaxKind::Root)
 }

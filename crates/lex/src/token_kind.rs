@@ -10,7 +10,7 @@ pub enum TokenKind {
     Whitespace,
     #[regex("#.*")]
     Comment,
-    #[regex(r"[\r\n]+")]
+    #[regex(r"[\r\n]")]
     NewLine,
 
     // Single-character tokens
