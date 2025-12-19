@@ -1,17 +1,13 @@
+mod node;
+
+pub use node::AstNode;
+
+use node::ast_node;
 use syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
-#[derive(Debug)]
-pub struct Root(SyntaxNode);
+ast_node!(Root, SyntaxKind::Root);
 
 impl Root {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::Root {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-
     pub fn items(&self) -> impl Iterator<Item = Item> {
         self.0.children().filter_map(Item::cast)
     }
@@ -19,7 +15,6 @@ impl Root {
 
 #[derive(Debug)]
 pub enum Item {
-    FunctionDefinition(FunctionDefinition),
     VariableDefinition(VariableDefinition),
     VariableAssignment(VariableAssignment),
     Expression(Expression),
@@ -28,158 +23,17 @@ pub enum Item {
 impl Item {
     pub fn cast(node: SyntaxNode) -> Option<Item> {
         let result = match node.kind() {
-            SyntaxKind::FunctionDeclaration => Self::FunctionDefinition(FunctionDefinition(node)),
             SyntaxKind::VariableDefinition => Self::VariableDefinition(VariableDefinition(node)),
             SyntaxKind::VariableAssignment => Self::VariableAssignment(VariableAssignment(node)),
             _ => Self::Expression(Expression::cast(node)?),
         };
-
         Some(result)
     }
 }
 
-#[derive(Debug)]
-pub struct FunctionDefinition(SyntaxNode);
-
-impl FunctionDefinition {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::FunctionDeclaration {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-
-    pub fn name(&self) -> Option<SyntaxToken> {
-        self.0
-            .children_with_tokens()
-            .filter_map(SyntaxElement::into_token)
-            .find(|token| token.kind() == SyntaxKind::Identifier)
-    }
-
-    pub fn parameters(&self) -> Option<ParameterList> {
-        self.0.children().find_map(ParameterList::cast)
-    }
-
-    pub fn return_type_annotation(&self) -> Option<ReturnTypeAnnotation> {
-        self.0.children().find_map(ReturnTypeAnnotation::cast)
-    }
-
-    pub fn body(&self) -> Option<Block> {
-        self.0
-            .children()
-            .find(|node| node.kind() == SyntaxKind::Block)
-            .and_then(Block::cast)
-    }
-}
-
-#[derive(Debug)]
-pub struct ParameterList(SyntaxNode);
-
-impl ParameterList {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::ParameterList {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-
-    pub fn parameters(&self) -> impl Iterator<Item = Parameter> {
-        self.0.children().filter_map(Parameter::cast)
-    }
-}
-
-#[derive(Debug)]
-pub struct Parameter(SyntaxNode);
-
-impl Parameter {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::Parameter {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-
-    pub fn name(&self) -> Option<SyntaxToken> {
-        self.0
-            .children_with_tokens()
-            .filter_map(SyntaxElement::into_token)
-            .find(|token| token.kind() == SyntaxKind::Identifier)
-    }
-
-    pub fn type_annotation(&self) -> Option<TypeAnnotation> {
-        self.0.children().find_map(TypeAnnotation::cast)
-    }
-}
-
-#[derive(Debug)]
-pub struct TypeAnnotation(SyntaxNode);
-
-impl TypeAnnotation {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::TypeAnnotation {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-
-    pub fn type_token(&self) -> Option<SyntaxToken> {
-        self.0
-            .children_with_tokens()
-            .filter_map(SyntaxElement::into_token)
-            .find(|token| token.kind() == SyntaxKind::Identifier)
-    }
-}
-
-#[derive(Debug)]
-pub struct ReturnTypeAnnotation(SyntaxNode);
-
-impl ReturnTypeAnnotation {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::ReturnTypeAnnotation {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-
-    pub fn type_annotation(&self) -> Option<TypeAnnotation> {
-        self.0.children().find_map(TypeAnnotation::cast)
-    }
-}
-
-#[derive(Debug)]
-pub struct Block(SyntaxNode);
-
-impl Block {
-    pub fn statements(&self) -> impl Iterator<Item = Statement> {
-        self.0.children().filter_map(Statement::cast)
-    }
-
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::Block {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct VariableAssignment(SyntaxNode);
+ast_node!(VariableAssignment, SyntaxKind::VariableAssignment);
 
 impl VariableAssignment {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::VariableAssignment {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-
     pub fn name(&self) -> Option<SyntaxToken> {
         self.0
             .children_with_tokens()
@@ -192,18 +46,9 @@ impl VariableAssignment {
     }
 }
 
-#[derive(Debug)]
-pub struct VariableDefinition(SyntaxNode);
+ast_node!(VariableDefinition, SyntaxKind::VariableDefinition);
 
 impl VariableDefinition {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        if node.kind() == SyntaxKind::VariableDefinition {
-            Some(Self(node))
-        } else {
-            None
-        }
-    }
-
     pub fn name(&self) -> Option<SyntaxToken> {
         self.0
             .children_with_tokens()
@@ -218,32 +63,30 @@ impl VariableDefinition {
 
 #[derive(Debug)]
 pub enum Expression {
-    Binary(BinaryExpression),
+    Infix(InfixExpression),
     Literal(Literal),
     Parenthesis(ParenthesisExpression),
-    Unary(UnaryExpression),
+    Prefix(PrefixExpression),
     VariableReference(VariableReference),
 }
 
 impl Expression {
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         let result = match node.kind() {
-            SyntaxKind::InfixExpression => Self::Binary(BinaryExpression(node)),
+            SyntaxKind::InfixExpression => Self::Infix(InfixExpression(node)),
             SyntaxKind::Literal => Self::Literal(Literal(node)),
             SyntaxKind::ParenthesisExpression => Self::Parenthesis(ParenthesisExpression(node)),
-            SyntaxKind::PrefixExpression => Self::Unary(UnaryExpression(node)),
+            SyntaxKind::PrefixExpression => Self::Prefix(PrefixExpression(node)),
             SyntaxKind::VariableReference => Self::VariableReference(VariableReference(node)),
             _ => return None,
         };
-
         Some(result)
     }
 }
 
-#[derive(Debug)]
-pub struct BinaryExpression(SyntaxNode);
+ast_node!(InfixExpression, SyntaxKind::InfixExpression);
 
-impl BinaryExpression {
+impl InfixExpression {
     pub fn lhs(&self) -> Option<Expression> {
         self.0.children().find_map(Expression::cast)
     }
@@ -259,18 +102,41 @@ impl BinaryExpression {
             .find(|token| {
                 matches!(
                     token.kind(),
-                    SyntaxKind::Plus | SyntaxKind::Minus | SyntaxKind::Asterisk | SyntaxKind::Slash,
+                    // Integer arithmetic
+                    SyntaxKind::Plus
+                        | SyntaxKind::Minus
+                        | SyntaxKind::Asterisk
+                        | SyntaxKind::Slash
+                        | SyntaxKind::Percent
+                        // Float arithmetic
+                        | SyntaxKind::PlusDot
+                        | SyntaxKind::MinusDot
+                        | SyntaxKind::AsteriskDot
+                        | SyntaxKind::SlashDot
+                        // Comparison
+                        | SyntaxKind::EqualsEquals
+                        | SyntaxKind::NotEquals
+                        | SyntaxKind::GreaterThan
+                        | SyntaxKind::LessThan
+                        | SyntaxKind::GreaterThanOrEqual
+                        | SyntaxKind::LessThanOrEqual
+                        // Float comparison
+                        | SyntaxKind::GreaterThanDot
+                        | SyntaxKind::LessThanDot
+                        | SyntaxKind::GreaterThanOrEqualDot
+                        | SyntaxKind::LessThanOrEqualDot
+                        // Boolean
+                        | SyntaxKind::AndKeyword
+                        | SyntaxKind::OrKeyword,
                 )
             })
     }
 }
 
-#[derive(Debug)]
-pub struct Literal(SyntaxNode);
+ast_node!(Literal, SyntaxKind::Literal);
 
 impl Literal {
     pub fn parse(&self) -> u64 {
-        // Find the actual integer token, skipping whitespace
         let token = self
             .0
             .children_with_tokens()
@@ -287,8 +153,7 @@ impl Literal {
     }
 }
 
-#[derive(Debug)]
-pub struct ParenthesisExpression(SyntaxNode);
+ast_node!(ParenthesisExpression, SyntaxKind::ParenthesisExpression);
 
 impl ParenthesisExpression {
     pub fn expression(&self) -> Option<Expression> {
@@ -296,10 +161,9 @@ impl ParenthesisExpression {
     }
 }
 
-#[derive(Debug)]
-pub struct UnaryExpression(SyntaxNode);
+ast_node!(PrefixExpression, SyntaxKind::PrefixExpression);
 
-impl UnaryExpression {
+impl PrefixExpression {
     pub fn expression(&self) -> Option<Expression> {
         self.0.children().find_map(Expression::cast)
     }
@@ -308,12 +172,11 @@ impl UnaryExpression {
         self.0
             .children_with_tokens()
             .filter_map(SyntaxElement::into_token)
-            .find(|token| token.kind() == SyntaxKind::Minus)
+            .find(|token| matches!(token.kind(), SyntaxKind::Minus | SyntaxKind::Bang))
     }
 }
 
-#[derive(Debug)]
-pub struct VariableReference(SyntaxNode);
+ast_node!(VariableReference, SyntaxKind::VariableReference);
 
 impl VariableReference {
     pub fn name(&self) -> Option<SyntaxToken> {
@@ -324,21 +187,197 @@ impl VariableReference {
     }
 }
 
-#[derive(Debug)]
-pub enum Statement {
-    VariableDefinition(VariableDefinition),
-    VariableAssignment(VariableAssignment),
-    Expression(Expression),
+ast_node!(TypeAnnotation, SyntaxKind::TypeAnnotation);
+
+impl TypeAnnotation {
+    pub fn type_token(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
 }
 
-impl Statement {
-    pub fn cast(node: SyntaxNode) -> Option<Self> {
-        let result = match node.kind() {
-            SyntaxKind::VariableDefinition => Self::VariableDefinition(VariableDefinition(node)),
-            SyntaxKind::VariableAssignment => Self::VariableAssignment(VariableAssignment(node)),
-            _ => Self::Expression(Expression::cast(node)?),
-        };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        Some(result)
+    fn parse_root(input: &str) -> Root {
+        let (node, _) = parse::parse(input);
+        Root::cast(node).unwrap()
+    }
+
+    #[test]
+    fn variable_definition_complete() {
+        let root = parse_root("x := 42");
+        let item = root.items().next().unwrap();
+        let Item::VariableDefinition(def) = item else {
+            panic!("expected VariableDefinition")
+        };
+        assert_eq!(def.name().unwrap().text(), "x");
+        assert!(def.value().is_some());
+    }
+
+    #[test]
+    fn variable_definition_missing_value() {
+        // Parser recovers: node exists but value() returns None
+        let root = parse_root("x :=");
+        let item = root.items().next().unwrap();
+        let Item::VariableDefinition(def) = item else {
+            panic!("expected VariableDefinition")
+        };
+        assert_eq!(def.name().unwrap().text(), "x");
+        assert!(def.value().is_none(), "missing value should return None");
+    }
+
+    #[test]
+    fn infix_integer_operators() {
+        for (input, expected) in [
+            ("1 + 2", SyntaxKind::Plus),
+            ("1 - 2", SyntaxKind::Minus),
+            ("1 * 2", SyntaxKind::Asterisk),
+            ("1 / 2", SyntaxKind::Slash),
+            ("1 % 2", SyntaxKind::Percent),
+        ] {
+            let root = parse_root(&format!("x := {input}"));
+            let item = root.items().next().unwrap();
+            let Item::VariableDefinition(def) = item else {
+                panic!("expected VariableDefinition")
+            };
+            let Expression::Infix(infix) = def.value().unwrap() else {
+                panic!("expected InfixExpression for {input}")
+            };
+            assert_eq!(infix.operation().unwrap().kind(), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn infix_float_operators() {
+        for (input, expected) in [
+            ("1.0 +. 2.0", SyntaxKind::PlusDot),
+            ("1.0 -. 2.0", SyntaxKind::MinusDot),
+            ("1.0 *. 2.0", SyntaxKind::AsteriskDot),
+            ("1.0 /. 2.0", SyntaxKind::SlashDot),
+        ] {
+            let root = parse_root(&format!("x := {input}"));
+            let item = root.items().next().unwrap();
+            let Item::VariableDefinition(def) = item else {
+                panic!("expected VariableDefinition")
+            };
+            let Expression::Infix(infix) = def.value().unwrap() else {
+                panic!("expected InfixExpression for {input}")
+            };
+            assert_eq!(infix.operation().unwrap().kind(), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn infix_comparison_operators() {
+        for (input, expected) in [
+            ("a == b", SyntaxKind::EqualsEquals),
+            ("a != b", SyntaxKind::NotEquals),
+            ("a > b", SyntaxKind::GreaterThan),
+            ("a < b", SyntaxKind::LessThan),
+            ("a >= b", SyntaxKind::GreaterThanOrEqual),
+            ("a <= b", SyntaxKind::LessThanOrEqual),
+        ] {
+            let root = parse_root(&format!("x := {input}"));
+            let item = root.items().next().unwrap();
+            let Item::VariableDefinition(def) = item else {
+                panic!("expected VariableDefinition")
+            };
+            let Expression::Infix(infix) = def.value().unwrap() else {
+                panic!("expected InfixExpression for {input}")
+            };
+            assert_eq!(infix.operation().unwrap().kind(), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn infix_boolean_operators() {
+        for (input, expected) in [
+            ("a and b", SyntaxKind::AndKeyword),
+            ("a or b", SyntaxKind::OrKeyword),
+        ] {
+            let root = parse_root(&format!("x := {input}"));
+            let item = root.items().next().unwrap();
+            let Item::VariableDefinition(def) = item else {
+                panic!("expected VariableDefinition")
+            };
+            let Expression::Infix(infix) = def.value().unwrap() else {
+                panic!("expected InfixExpression for {input}")
+            };
+            assert_eq!(infix.operation().unwrap().kind(), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn prefix_operators() {
+        for (input, expected) in [("-5", SyntaxKind::Minus), ("!true", SyntaxKind::Bang)] {
+            let root = parse_root(&format!("x := {input}"));
+            let item = root.items().next().unwrap();
+            let Item::VariableDefinition(def) = item else {
+                panic!("expected VariableDefinition")
+            };
+            let Expression::Prefix(prefix) = def.value().unwrap() else {
+                panic!("expected PrefixExpression for {input}")
+            };
+            assert_eq!(prefix.operation().unwrap().kind(), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn infix_missing_rhs() {
+        // "1 +" with missing rhs - lhs exists, rhs is None
+        let root = parse_root("x := 1 +");
+        let item = root.items().next().unwrap();
+        let Item::VariableDefinition(def) = item else {
+            panic!("expected VariableDefinition")
+        };
+        let Expression::Infix(infix) = def.value().unwrap() else {
+            panic!("expected InfixExpression")
+        };
+        assert!(infix.lhs().is_some());
+        assert!(infix.rhs().is_none(), "missing rhs should return None");
+    }
+
+    #[test]
+    fn parenthesis_missing_inner() {
+        // "()" with missing inner expression
+        let root = parse_root("x := ()");
+        let item = root.items().next().unwrap();
+        let Item::VariableDefinition(def) = item else {
+            panic!("expected VariableDefinition")
+        };
+        let Expression::Parenthesis(paren) = def.value().unwrap() else {
+            panic!("expected ParenthesisExpression")
+        };
+        assert!(
+            paren.expression().is_none(),
+            "empty parens should return None"
+        );
+    }
+
+    #[test]
+    fn unclosed_paren_still_casts() {
+        // "(1 + 2" unclosed - should still produce ParenthesisExpression
+        let root = parse_root("x := (1 + 2");
+        let item = root.items().next().unwrap();
+        let Item::VariableDefinition(def) = item else {
+            panic!("expected VariableDefinition")
+        };
+        let Expression::Parenthesis(paren) = def.value().unwrap() else {
+            panic!("expected ParenthesisExpression")
+        };
+        // Inner expression should exist despite missing close paren
+        assert!(paren.expression().is_some());
+    }
+
+    #[test]
+    fn cast_wrong_kind_returns_none() {
+        let root = parse_root("x := 1");
+        let syntax = root.syntax().clone();
+        // Root node cannot cast to VariableDefinition
+        assert!(VariableDefinition::cast(syntax).is_none());
     }
 }
