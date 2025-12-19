@@ -1,0 +1,12 @@
+[package]
+name = "hir"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ast = { path = "../ast" }
+la-arena = "0.3.1"
+syntax = { path = "../syntax" }
+
+[dev-dependencies]
+parse = { path = "../parse" }

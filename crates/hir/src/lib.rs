@@ -1,0 +1,89 @@
+mod lower;
+
+pub use lower::{LowerResult, lower};
+
+use la_arena::Idx;
+
+pub type ExprIdx = Idx<Expression>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Type {
+    Integer,
+    Float,
+    Boolean,
+    String,
+}
+
+#[derive(Debug, Clone)]
+pub enum Item {
+    Definition(Definition),
+    Assignment { name: String, value: Expression },
+    Expression(Expression),
+}
+
+#[derive(Debug, Clone)]
+pub enum Definition {
+    Variable { name: String, value: Expression },
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+    Missing,
+    Literal(Literal),
+    Infix {
+        op: InfixOp,
+        lhs: ExprIdx,
+        rhs: ExprIdx,
+    },
+    Prefix {
+        op: PrefixOp,
+        expr: ExprIdx,
+    },
+    VariableRef {
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum Literal {
+    Integer(u64),
+    Float(f64),
+    Boolean(bool),
+    String(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InfixOp {
+    // Int arithmetic
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    // Float arithmetic
+    AddFloat,
+    SubFloat,
+    MulFloat,
+    DivFloat,
+    // Comparison (int)
+    Eq,
+    NotEq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    // Comparison (float)
+    GtFloat,
+    LtFloat,
+    GteFloat,
+    LteFloat,
+    // Boolean
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefixOp {
+    Neg,
+    Not,
+}
