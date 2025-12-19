@@ -6,14 +6,6 @@ use la_arena::Idx;
 
 pub type ExprIdx = Idx<Expression>;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Type {
-    Integer,
-    Float,
-    Boolean,
-    String,
-}
-
 #[derive(Debug, Clone)]
 pub enum Item {
     Definition(Definition),
