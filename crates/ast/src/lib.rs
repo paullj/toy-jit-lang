@@ -135,22 +135,118 @@ impl InfixExpression {
 
 ast_node!(Literal, SyntaxKind::Literal);
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiteralValue {
+    Integer(u64),
+    Float(f64),
+    Boolean(bool),
+    String(String),
+}
+
 impl Literal {
-    pub fn parse(&self) -> u64 {
+    pub fn value(&self) -> Option<LiteralValue> {
         let token = self
             .0
             .children_with_tokens()
             .filter_map(SyntaxElement::into_token)
-            .find(|token| token.kind() == SyntaxKind::Integer)
-            .expect("Literal node should contain an Integer token");
+            .find(|token| {
+                matches!(
+                    token.kind(),
+                    SyntaxKind::Integer
+                        | SyntaxKind::BinaryInteger
+                        | SyntaxKind::OctalInteger
+                        | SyntaxKind::HexInteger
+                        | SyntaxKind::Float
+                        | SyntaxKind::FloatExponent
+                        | SyntaxKind::String
+                        | SyntaxKind::MultiLineString
+                        | SyntaxKind::TrueKeyword
+                        | SyntaxKind::FalseKeyword
+                )
+            })?;
 
-        match token.text().parse::<u64>() {
-            Ok(value) => value,
-            Err(err) => {
-                panic!("Failed to parse literal '{}': {}", token.text(), err)
+        match token.kind() {
+            SyntaxKind::Integer => {
+                let text = token.text().replace('_', "");
+                text.parse::<u64>().ok().map(LiteralValue::Integer)
             }
+            SyntaxKind::BinaryInteger => {
+                let text = token.text().replace('_', "");
+                u64::from_str_radix(&text[2..], 2)
+                    .ok()
+                    .map(LiteralValue::Integer)
+            }
+            SyntaxKind::OctalInteger => {
+                let text = token.text().replace('_', "");
+                u64::from_str_radix(&text[2..], 8)
+                    .ok()
+                    .map(LiteralValue::Integer)
+            }
+            SyntaxKind::HexInteger => {
+                let text = token.text().replace('_', "");
+                u64::from_str_radix(&text[2..], 16)
+                    .ok()
+                    .map(LiteralValue::Integer)
+            }
+            SyntaxKind::Float | SyntaxKind::FloatExponent => {
+                let text = token.text().replace('_', "");
+                text.parse::<f64>().ok().map(LiteralValue::Float)
+            }
+            SyntaxKind::String => {
+                let text = token.text();
+                // Remove surrounding quotes and process escapes
+                let inner = &text[1..text.len() - 1];
+                Some(LiteralValue::String(process_escapes(inner)))
+            }
+            SyntaxKind::MultiLineString => {
+                let text = token.text();
+                // Remove surrounding triple quotes
+                let inner = &text[3..text.len() - 3];
+                Some(LiteralValue::String(inner.to_string()))
+            }
+            SyntaxKind::TrueKeyword => Some(LiteralValue::Boolean(true)),
+            SyntaxKind::FalseKeyword => Some(LiteralValue::Boolean(false)),
+            _ => None,
         }
     }
+}
+
+fn process_escapes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                Some('\\') => result.push('\\'),
+                Some('"') => result.push('"'),
+                Some('f') => result.push('\x0C'),
+                Some('u') => {
+                    // Unicode escape: \u{XXXXXX}
+                    if chars.next() == Some('{') {
+                        let hex: String = chars.by_ref().take_while(|&c| c != '}').collect();
+                        if let Ok(code) = u32::from_str_radix(&hex, 16)
+                            && let Some(ch) = char::from_u32(code)
+                        {
+                            result.push(ch);
+                        }
+                    }
+                }
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
 }
 
 ast_node!(ParenthesisExpression, SyntaxKind::ParenthesisExpression);
