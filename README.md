@@ -1,14 +1,4 @@
 todo
-- handle whitespace and trivia
-- parse expressions
-- check expression parsing is actually correct
-* good errors
-* parse, syntax tests
-
-- ast
-- hir
-- type checking
-  - function param types
 * good errors
 
 * lsp
@@ -19,20 +9,43 @@ todo
 * register based vm
 * look at hot paths and jit
 
-* repl
+* good repl
+
+* blocks
+* functions
+* control flow
+  * if/else
+  * loops
+  * match
+
+* structs
+* tuples
+* enums
+* traits
+* generics
+
 * modules
 
-* use an interner
-* cli
-  * repl
-  * create
-  * run
-  * build
-  * test
-  * lint
-  * dependencies
+* use an interner?
 
-* scripts can have frontmatter for deps + other metadata
+* cli
+
+```
+toy (runs repl or reads from stdin)
+toy run <script>
+toy build [options] <script>
+toy test
+toy format
+toy lint
+toy docs
+
+toy server
+
+toy new <project>
+toy add <package>
+toy remove <package>
+toy update
+```
 
 goals
 * easy to learn (minimal keywords)

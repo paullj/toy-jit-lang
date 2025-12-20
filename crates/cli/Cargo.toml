@@ -16,6 +16,7 @@ infer = { path = "../infer" }
 mir = { path = "../mir" }
 jit = { path = "../jit" }
 compile = { path = "../compile" }
+lsp = { path = "../lsp" }
 termcolor = "1.4.1"
 miette = { version = "7.6.0", features = ["fancy"] }
 thiserror = "2.0.16"

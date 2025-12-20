@@ -34,6 +34,10 @@ struct Args {
     /// JIT compile and execute (enabled by default)
     #[arg(long, default_value_t = true)]
     jit: bool,
+
+    /// Start LSP server (stdio)
+    #[arg(long)]
+    lsp: bool,
 }
 
 #[derive(Diagnostic, Debug, Error)]
@@ -56,6 +60,10 @@ struct TypeErrors {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    if args.lsp {
+        return lsp::run();
+    }
 
     if !args.jit {
         eprintln!("note: interpreter not implemented, --jit enabled by default");

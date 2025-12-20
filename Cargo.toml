@@ -10,5 +10,6 @@ members = [
     "crates/mir",
     "crates/jit",
     "crates/compile",
+    "crates/lsp",
     "crates/cli",
 ]
