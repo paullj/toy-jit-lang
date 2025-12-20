@@ -4,7 +4,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::diagnostics::{infer_diagnostic_to_diagnostic, parse_error_to_diagnostic};
+use crate::convert::to_lsp_diagnostic;
 use crate::state::State;
 
 pub struct Backend {
@@ -21,28 +21,16 @@ impl Backend {
     }
 
     async fn publish_diagnostics(&self, uri: Url) {
-        // Collect diagnostics while holding lock, then release before await
         let diagnostics = {
             let state = self.state.read().unwrap();
             let Some(doc) = state.get(&uri) else {
                 return;
             };
 
-            let mut diagnostics = Vec::new();
-
-            // Parse errors
-            for err in &doc.parse_errors {
-                diagnostics.push(parse_error_to_diagnostic(err, &doc.line_index));
-            }
-
-            // Type errors
-            if let Some(infer) = &doc.infer_result {
-                for err in &infer.diagnostics {
-                    diagnostics.push(infer_diagnostic_to_diagnostic(err, &doc.line_index));
-                }
-            }
-
-            diagnostics
+            doc.diagnostics()
+                .iter()
+                .map(to_lsp_diagnostic)
+                .collect::<Vec<_>>()
         };
 
         self.client
@@ -93,7 +81,6 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
 
-        // We use TextDocumentSyncKind::FULL, so there's exactly one change with full content
         if let Some(change) = params.content_changes.into_iter().next() {
             {
                 let mut state = self.state.write().unwrap();
@@ -110,7 +97,6 @@ impl LanguageServer for Backend {
             state.close(&uri);
         }
 
-        // Clear diagnostics
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
 }

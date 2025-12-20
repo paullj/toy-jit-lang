@@ -2,7 +2,6 @@ use la_arena::ArenaMap;
 use miette::SourceSpan;
 use std::collections::HashMap;
 
-use crate::InferenceResult;
 use crate::diagnostic::InferDiagnostic;
 use crate::env::TypeEnv;
 use crate::ops;
@@ -10,6 +9,7 @@ use crate::scheme::Scheme;
 use crate::subst::Subst;
 use crate::types::{Type, TypeVar};
 use crate::unify::{UnifyError, unify};
+use crate::{InferState, InferWithState, InferenceResult};
 use hir::{Definition, ExprIdx, Expression, Item, Literal, TextRange};
 
 fn to_span(range: TextRange) -> SourceSpan {
@@ -39,6 +39,17 @@ impl<'a> InferCtx<'a> {
         }
     }
 
+    pub(crate) fn with_env(hir: &'a hir::LowerResult, env: TypeEnv, next_var: u32) -> Self {
+        Self {
+            hir,
+            env,
+            subst: Subst::new(),
+            next_var,
+            expr_types: ArenaMap::default(),
+            diagnostics: Vec::new(),
+        }
+    }
+
     fn fresh_var(&mut self) -> TypeVar {
         let v = TypeVar::new(self.next_var);
         self.next_var += 1;
@@ -51,6 +62,14 @@ impl<'a> InferCtx<'a> {
             self.infer_item(item, span);
         }
         self.finalize()
+    }
+
+    pub(crate) fn infer_items_with_state(mut self) -> InferWithState {
+        for (i, item) in self.hir.items.iter().enumerate() {
+            let span = self.hir.item_spans.get(i).copied().unwrap_or_default();
+            self.infer_item(item, span);
+        }
+        self.finalize_with_state()
     }
 
     fn infer_item(&mut self, item: &Item, span: TextRange) {
@@ -216,6 +235,44 @@ impl<'a> InferCtx<'a> {
             expression_types,
             variable_types,
             diagnostics: self.diagnostics,
+        }
+    }
+
+    fn finalize_with_state(self) -> InferWithState {
+        let expression_types: ArenaMap<_, _> = self
+            .expr_types
+            .iter()
+            .map(|(idx, ty)| (idx, self.subst.apply(ty)))
+            .collect();
+
+        let variable_types: HashMap<_, _> = self
+            .env
+            .iter()
+            .map(|(name, scheme)| {
+                let ty = self.subst.apply(&scheme.ty);
+                (name.clone(), ty)
+            })
+            .collect();
+
+        // Apply substitution to env schemes for the returned state
+        let mut updated_env = TypeEnv::new();
+        for (name, scheme) in self.env.iter() {
+            let applied_ty = self.subst.apply(&scheme.ty);
+            // Re-generalize with the applied type
+            let new_scheme = Scheme::generalize(&updated_env, &applied_ty);
+            updated_env.insert(name.clone(), new_scheme);
+        }
+
+        InferWithState {
+            result: InferenceResult {
+                expression_types,
+                variable_types,
+                diagnostics: self.diagnostics,
+            },
+            state: InferState {
+                env: updated_env,
+                next_var: self.next_var,
+            },
         }
     }
 }

@@ -1,7 +1,35 @@
-todo
+**toy**
+
+toy is a simple programming language that is made for fun.
+
+**goals**
+
+* easy to learn
+* helpful errors
+* fast
+* great tooling
+
+**architecture**
+
+* frontend
+  * lexer
+  * parser
+  * ast
+  * hir
+  * mir
+* middle
+  * optimisations
+* backend
+  * jit compiler
+  * register based vm
+* tooling
+  * cli
+  * lsp server
+  * vscode extension
+
+**todo**
 * good errors
 
-* lsp
 * tree sitter?
 * vscode, zed extensions?
 
@@ -27,29 +55,3 @@ todo
 * modules
 
 * use an interner?
-
-* cli
-
-```
-toy (runs repl or reads from stdin)
-toy run <script>
-toy build [options] <script>
-toy test
-toy format
-toy lint
-toy docs
-
-toy server
-
-toy new <project>
-toy add <package>
-toy remove <package>
-toy update
-```
-
-goals
-* easy to learn (minimal keywords)
-* static type checking
-* good diagnostics
-* scripting + applications + libraries (+ notebooks?)
-* fast

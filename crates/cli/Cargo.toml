@@ -5,6 +5,10 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
+[[bin]]
+name = "toy"
+path = "src/main.rs"
+
 
 [dependencies]
 clap = { version = "4.5.41", features = ["derive"] }
@@ -16,8 +20,11 @@ infer = { path = "../infer" }
 mir = { path = "../mir" }
 jit = { path = "../jit" }
 compile = { path = "../compile" }
+analyse = { path = "../analyse" }
 lsp = { path = "../lsp" }
 termcolor = "1.4.1"
 miette = { version = "7.6.0", features = ["fancy"] }
 thiserror = "2.0.16"
 rustyline = "15"
+ratatui = "0.29"
+crossterm = "0.28"

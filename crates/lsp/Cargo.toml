@@ -9,8 +9,4 @@ tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros"] }
 miette = "7.6.0"
 
 # Internal crates
-syntax = { path = "../syntax" }
-parse = { path = "../parse" }
-ast = { path = "../ast" }
-hir = { path = "../hir" }
-infer = { path = "../infer" }
+analyse = { path = "../analyse" }

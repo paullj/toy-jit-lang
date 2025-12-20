@@ -1,6 +1,5 @@
 mod backend;
-mod diagnostics;
-mod line_index;
+mod convert;
 mod state;
 
 use tower_lsp::{LspService, Server};

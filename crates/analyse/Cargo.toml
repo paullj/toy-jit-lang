@@ -1,0 +1,14 @@
+[package]
+name = "analyse"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+miette = "7.6.0"
+
+# Internal crates
+syntax = { path = "../syntax" }
+parse = { path = "../parse" }
+ast = { path = "../ast" }
+hir = { path = "../hir" }
+infer = { path = "../infer" }

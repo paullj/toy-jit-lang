@@ -8,6 +8,8 @@ pub mod types;
 mod unify;
 
 pub use diagnostic::InferDiagnostic;
+pub use env::TypeEnv;
+pub use scheme::Scheme;
 pub use types::Type;
 
 use la_arena::ArenaMap;
@@ -38,9 +40,34 @@ impl InferenceResult {
     }
 }
 
+/// Persistent state for incremental type inference in REPL.
+#[derive(Debug, Clone, Default)]
+pub struct InferState {
+    pub env: TypeEnv,
+    pub next_var: u32,
+}
+
+impl InferState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// Result of inference with updated state for REPL.
+pub struct InferWithState {
+    pub result: InferenceResult,
+    pub state: InferState,
+}
+
 pub fn infer(lower_result: &hir::LowerResult) -> InferenceResult {
     let ctx = context::InferCtx::new(lower_result);
     ctx.infer_items()
+}
+
+/// Infer with existing state, returning updated state for subsequent calls.
+pub fn infer_with_state(lower_result: &hir::LowerResult, state: InferState) -> InferWithState {
+    let ctx = context::InferCtx::with_env(lower_result, state.env, state.next_var);
+    ctx.infer_items_with_state()
 }
 
 #[cfg(test)]
@@ -123,5 +150,44 @@ mod tests {
 
         let inferred = infer(&result);
         assert_eq!(inferred.get_variable_type("x"), Some(&Type::Error));
+    }
+
+    #[test]
+    fn test_incremental_inference() {
+        // First command: x := 1
+        let result1 = make_lower_result(vec![Item::Definition(Definition::Variable {
+            name: "x".to_string(),
+            value: Expression::Literal(Literal::Integer(42)),
+        })]);
+
+        let infer1 = infer_with_state(&result1, InferState::new());
+        assert_eq!(infer1.result.get_variable_type("x"), Some(&Type::Integer));
+
+        // Second command: x = 10 (should work because x is in state)
+        let result2 = make_lower_result(vec![Item::Assignment {
+            name: "x".to_string(),
+            value: Expression::Literal(Literal::Integer(10)),
+        }]);
+
+        let infer2 = infer_with_state(&result2, infer1.state);
+        assert!(
+            !infer2.result.has_errors(),
+            "assignment to existing var should work"
+        );
+    }
+
+    #[test]
+    fn test_incremental_inference_undefined() {
+        // First command: assign to undefined y (should error)
+        let result1 = make_lower_result(vec![Item::Assignment {
+            name: "y".to_string(),
+            value: Expression::Literal(Literal::Integer(1)),
+        }]);
+
+        let infer1 = infer_with_state(&result1, InferState::new());
+        assert!(
+            infer1.result.has_errors(),
+            "assignment to undefined var should error"
+        );
     }
 }

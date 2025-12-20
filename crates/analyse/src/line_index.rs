@@ -1,12 +1,35 @@
 use syntax::TextRange;
-use tower_lsp::lsp_types::{Position, Range};
 
-/// Maps between byte offsets and LSP positions (line + UTF-16 column).
+/// 0-indexed position (line + UTF-16 column).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Position {
+    pub line: u32,
+    pub character: u32,
+}
+
+impl Position {
+    pub fn new(line: u32, character: u32) -> Self {
+        Self { line, character }
+    }
+}
+
+/// Range defined by start and end positions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Range {
+    pub start: Position,
+    pub end: Position,
+}
+
+impl Range {
+    pub fn new(start: Position, end: Position) -> Self {
+        Self { start, end }
+    }
+}
+
+/// Maps between byte offsets and positions (line + UTF-16 column).
 #[derive(Debug, Clone)]
 pub struct LineIndex {
-    /// Byte offset of the start of each line.
     line_starts: Vec<u32>,
-    /// Source text (needed for UTF-16 conversion).
     text: String,
 }
 
@@ -24,13 +47,12 @@ impl LineIndex {
         }
     }
 
-    /// Convert byte offset to LSP Position (0-indexed line + UTF-16 column).
+    /// Convert byte offset to Position (0-indexed line + UTF-16 column).
     pub fn position(&self, offset: u32) -> Position {
         let line = self.line_of_offset(offset);
         let line_start = self.line_starts[line as usize];
         let col_byte = offset - line_start;
 
-        // Get the line text up to the offset
         let line_end = self
             .line_starts
             .get(line as usize + 1)
@@ -38,14 +60,12 @@ impl LineIndex {
             .unwrap_or(self.text.len() as u32);
         let line_text = &self.text[line_start as usize..line_end as usize];
 
-        // Convert byte column to UTF-16 code units
         let col_utf16 = utf8_to_utf16_col(line_text, col_byte as usize);
 
         Position::new(line, col_utf16)
     }
 
-    /// Convert LSP Position to byte offset.
-    #[allow(dead_code)]
+    /// Convert Position to byte offset.
     pub fn offset(&self, pos: Position) -> u32 {
         let line = pos.line as usize;
         if line >= self.line_starts.len() {
@@ -60,14 +80,12 @@ impl LineIndex {
             .unwrap_or(self.text.len() as u32);
         let line_text = &self.text[line_start as usize..line_end as usize];
 
-        // Convert UTF-16 column to byte offset
         let col_byte = utf16_to_utf8_col(line_text, pos.character as usize);
 
         line_start + col_byte as u32
     }
 
-    /// Convert TextRange to LSP Range.
-    #[allow(dead_code)]
+    /// Convert TextRange to Range.
     pub fn range(&self, text_range: TextRange) -> Range {
         Range::new(
             self.position(text_range.start().into()),
@@ -83,14 +101,11 @@ impl LineIndex {
     }
 }
 
-/// Convert byte column to UTF-16 code units.
 fn utf8_to_utf16_col(line: &str, byte_col: usize) -> u32 {
     let byte_col = byte_col.min(line.len());
     line[..byte_col].encode_utf16().count() as u32
 }
 
-/// Convert UTF-16 column to byte offset within line.
-#[allow(dead_code)]
 fn utf16_to_utf8_col(line: &str, utf16_col: usize) -> usize {
     let mut utf16_count = 0;
     for (i, c) in line.char_indices() {
@@ -117,20 +132,21 @@ mod tests {
 
     #[test]
     fn test_utf16() {
-        // '😀' is 4 bytes in UTF-8, 2 code units in UTF-16
-        let idx = LineIndex::new("a😀b");
-        assert_eq!(idx.position(0), Position::new(0, 0)); // 'a'
-        assert_eq!(idx.position(1), Position::new(0, 1)); // start of emoji
-        assert_eq!(idx.position(5), Position::new(0, 3)); // 'b' (1 + 2 utf16 units)
+        let idx = LineIndex::new("a\u{1F600}b");
+        assert_eq!(idx.position(0), Position::new(0, 0));
+        assert_eq!(idx.position(1), Position::new(0, 1));
+        assert_eq!(idx.position(5), Position::new(0, 3));
     }
 
     #[test]
     fn test_roundtrip() {
-        let idx = LineIndex::new("foo\nbar😀baz");
-        for offset in 0..15 {
-            let pos = idx.position(offset);
+        let text = "foo\nbar\u{1F600}baz";
+        let idx = LineIndex::new(text);
+        // Only test valid char boundaries
+        for (offset, _) in text.char_indices() {
+            let pos = idx.position(offset as u32);
             let back = idx.offset(pos);
-            assert_eq!(offset, back, "roundtrip failed for offset {offset}");
+            assert_eq!(offset as u32, back, "roundtrip failed for offset {offset}");
         }
     }
 }
