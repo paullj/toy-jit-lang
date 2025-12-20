@@ -1,0 +1,10 @@
+[package]
+name = "infer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+la-arena = "0.3.1"
+hir = { path = "../hir" }
+miette = "7.6.0"
+thiserror = "2.0.16"

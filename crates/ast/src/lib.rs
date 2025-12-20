@@ -29,6 +29,14 @@ impl Item {
         };
         Some(result)
     }
+
+    pub fn syntax(&self) -> &SyntaxNode {
+        match self {
+            Item::VariableDefinition(n) => n.syntax(),
+            Item::VariableAssignment(n) => n.syntax(),
+            Item::Expression(e) => e.syntax(),
+        }
+    }
 }
 
 ast_node!(VariableAssignment, SyntaxKind::VariableAssignment);
@@ -81,6 +89,16 @@ impl Expression {
             _ => return None,
         };
         Some(result)
+    }
+
+    pub fn syntax(&self) -> &SyntaxNode {
+        match self {
+            Expression::Infix(n) => n.syntax(),
+            Expression::Literal(n) => n.syntax(),
+            Expression::Parenthesis(n) => n.syntax(),
+            Expression::Prefix(n) => n.syntax(),
+            Expression::VariableReference(n) => n.syntax(),
+        }
     }
 }
 

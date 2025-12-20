@@ -163,6 +163,7 @@ pub enum Language {}
 pub type SyntaxNode = rowan::SyntaxNode<Language>;
 pub type SyntaxToken = rowan::SyntaxToken<Language>;
 pub type SyntaxElement = rowan::SyntaxElement<Language>;
+pub type TextRange = rowan::TextRange;
 
 impl rowan::Language for Language {
     type Kind = SyntaxKind;

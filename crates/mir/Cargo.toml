@@ -1,0 +1,11 @@
+[package]
+name = "mir"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hir = { path = "../hir" }
+infer = { path = "../infer" }
+
+[dev-dependencies]
+la-arena = "0.3.1"

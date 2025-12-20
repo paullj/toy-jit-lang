@@ -13,7 +13,10 @@ parse = { path = "../parse" }
 ast = { path = "../ast" }
 hir = { path = "../hir" }
 infer = { path = "../infer" }
-
+mir = { path = "../mir" }
+jit = { path = "../jit" }
+compile = { path = "../compile" }
 termcolor = "1.4.1"
 miette = { version = "7.6.0", features = ["fancy"] }
 thiserror = "2.0.16"
+rustyline = "15"

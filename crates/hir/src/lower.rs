@@ -1,51 +1,85 @@
-use crate::{Definition, Expression, InfixOp, Item, Literal, PrefixOp};
-use la_arena::Arena;
-use syntax::SyntaxKind;
+use crate::{Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp};
+use la_arena::{Arena, ArenaMap};
+use syntax::{SyntaxKind, TextRange};
 
 #[derive(Debug, Default)]
 pub struct LowerResult {
     pub items: Vec<Item>,
     pub expressions: Arena<Expression>,
+    pub expr_spans: ArenaMap<ExprIdx, TextRange>,
+    pub item_spans: Vec<TextRange>,
+}
+
+struct Ctx {
+    expressions: Arena<Expression>,
+    expr_spans: ArenaMap<ExprIdx, TextRange>,
+}
+
+impl Ctx {
+    fn new() -> Self {
+        Self {
+            expressions: Arena::new(),
+            expr_spans: ArenaMap::new(),
+        }
+    }
+
+    fn alloc(&mut self, expr: Expression, span: TextRange) -> ExprIdx {
+        let idx = self.expressions.alloc(expr);
+        self.expr_spans.insert(idx, span);
+        idx
+    }
 }
 
 pub fn lower(root: ast::Root) -> LowerResult {
-    let mut result = LowerResult::default();
-    result.items = root
-        .items()
-        .filter_map(|item| lower_item(&mut result.expressions, item))
-        .collect();
-    result
+    let mut ctx = Ctx::new();
+    let mut items = Vec::new();
+    let mut item_spans = Vec::new();
+
+    for item in root.items() {
+        let span = item.syntax().text_range();
+        if let Some(lowered) = lower_item(&mut ctx, item) {
+            items.push(lowered);
+            item_spans.push(span);
+        }
+    }
+
+    LowerResult {
+        items,
+        expressions: ctx.expressions,
+        expr_spans: ctx.expr_spans,
+        item_spans,
+    }
 }
 
-fn lower_item(arena: &mut Arena<Expression>, ast: ast::Item) -> Option<Item> {
+fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
     match ast {
         ast::Item::VariableDefinition(def) => {
             let name = def.name()?.text().to_string();
-            let value = lower_expression(arena, def.value());
+            let value = lower_expression(ctx, def.value());
             Some(Item::Definition(Definition::Variable { name, value }))
         }
         ast::Item::VariableAssignment(asgn) => {
             let name = asgn.name()?.text().to_string();
-            let value = lower_expression(arena, asgn.value());
+            let value = lower_expression(ctx, asgn.value());
             Some(Item::Assignment { name, value })
         }
         ast::Item::Expression(expr) => {
-            let value = lower_expression(arena, Some(expr));
+            let value = lower_expression(ctx, Some(expr));
             Some(Item::Expression(value))
         }
     }
 }
 
-fn lower_expression(arena: &mut Arena<Expression>, ast: Option<ast::Expression>) -> Expression {
+fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
     let Some(ast) = ast else {
         return Expression::Missing;
     };
 
     match ast {
-        ast::Expression::Infix(infix) => lower_infix(arena, infix),
+        ast::Expression::Infix(infix) => lower_infix(ctx, infix),
         ast::Expression::Literal(lit) => Expression::Literal(lower_literal(lit)),
-        ast::Expression::Parenthesis(paren) => lower_expression(arena, paren.expression()),
-        ast::Expression::Prefix(prefix) => lower_prefix(arena, prefix),
+        ast::Expression::Parenthesis(paren) => lower_expression(ctx, paren.expression()),
+        ast::Expression::Prefix(prefix) => lower_prefix(ctx, prefix),
         ast::Expression::VariableReference(var) => {
             if let Some(name) = var.name() {
                 Expression::VariableRef {
@@ -58,7 +92,7 @@ fn lower_expression(arena: &mut Arena<Expression>, ast: Option<ast::Expression>)
     }
 }
 
-fn lower_infix(arena: &mut Arena<Expression>, ast: ast::InfixExpression) -> Expression {
+fn lower_infix(ctx: &mut Ctx, ast: ast::InfixExpression) -> Expression {
     let Some(op_token) = ast.operation() else {
         return Expression::Missing;
     };
@@ -93,17 +127,28 @@ fn lower_infix(arena: &mut Arena<Expression>, ast: ast::InfixExpression) -> Expr
         _ => return Expression::Missing,
     };
 
-    let lhs = lower_expression(arena, ast.lhs());
-    let rhs = lower_expression(arena, ast.rhs());
+    let lhs_ast = ast.lhs();
+    let rhs_ast = ast.rhs();
+    let lhs_span = lhs_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let rhs_span = rhs_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+
+    let lhs = lower_expression(ctx, lhs_ast);
+    let rhs = lower_expression(ctx, rhs_ast);
 
     Expression::Infix {
         op,
-        lhs: arena.alloc(lhs),
-        rhs: arena.alloc(rhs),
+        lhs: ctx.alloc(lhs, lhs_span),
+        rhs: ctx.alloc(rhs, rhs_span),
     }
 }
 
-fn lower_prefix(arena: &mut Arena<Expression>, ast: ast::PrefixExpression) -> Expression {
+fn lower_prefix(ctx: &mut Ctx, ast: ast::PrefixExpression) -> Expression {
     let Some(op_token) = ast.operation() else {
         return Expression::Missing;
     };
@@ -114,11 +159,16 @@ fn lower_prefix(arena: &mut Arena<Expression>, ast: ast::PrefixExpression) -> Ex
         _ => return Expression::Missing,
     };
 
-    let expr = lower_expression(arena, ast.expression());
+    let expr_ast = ast.expression();
+    let expr_span = expr_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let expr = lower_expression(ctx, expr_ast);
 
     Expression::Prefix {
         op,
-        expr: arena.alloc(expr),
+        expr: ctx.alloc(expr, expr_span),
     }
 }
 

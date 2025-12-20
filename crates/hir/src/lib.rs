@@ -1,6 +1,7 @@
 mod lower;
 
 pub use lower::{LowerResult, lower};
+pub use syntax::TextRange;
 
 use la_arena::Idx;
 
