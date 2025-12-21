@@ -1,5 +1,6 @@
 use crate::{
-    Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp, SymbolKind, SymbolTable,
+    BlockItem, Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp, SymbolKind,
+    SymbolTable,
 };
 use ast::AstNode;
 use la_arena::{Arena, ArenaMap};
@@ -114,6 +115,7 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
                 Expression::Missing
             }
         }
+        ast::Expression::Block(block) => lower_block(ctx, block),
     }
 }
 
@@ -204,6 +206,72 @@ fn lower_literal(ast: ast::Literal) -> Literal {
         Some(ast::LiteralValue::Boolean(b)) => Literal::Boolean(b),
         Some(ast::LiteralValue::String(s)) => Literal::String(s),
         None => Literal::Integer(0), // fallback for malformed literals
+    }
+}
+
+fn lower_block(ctx: &mut Ctx, ast: ast::BlockExpression) -> Expression {
+    ctx.symbols.push_scope();
+
+    let mut items = Vec::new();
+
+    for ast_item in ast.items() {
+        if let Some(block_item) = lower_block_item(ctx, ast_item) {
+            items.push(block_item);
+        }
+    }
+
+    // Tail is the last item if it's an expression (not definition/assignment)
+    let tail = items.last().and_then(|item| match item {
+        BlockItem::Expression(idx) => Some(*idx),
+        _ => None,
+    });
+
+    ctx.symbols.pop_scope();
+
+    Expression::Block { items, tail }
+}
+
+fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
+    match ast {
+        ast::Item::VariableDefinition(def) => {
+            let name_token = def.name()?;
+            let name = name_token.text().to_string();
+            let def_span = def.syntax().text_range();
+            let name_span = name_token.text_range();
+            ctx.define_symbol(name.clone(), def_span, name_span);
+            let value = lower_expression(ctx, def.value());
+            let value_span = def
+                .value()
+                .map(|e| e.syntax().text_range())
+                .unwrap_or_default();
+            let value_idx = ctx.alloc(value, value_span);
+            Some(BlockItem::Definition {
+                name,
+                value: value_idx,
+            })
+        }
+        ast::Item::VariableAssignment(asgn) => {
+            let name_token = asgn.name()?;
+            let name = name_token.text().to_string();
+            let name_span = name_token.text_range();
+            ctx.add_reference(&name, name_span);
+            let value = lower_expression(ctx, asgn.value());
+            let value_span = asgn
+                .value()
+                .map(|e| e.syntax().text_range())
+                .unwrap_or_default();
+            let value_idx = ctx.alloc(value, value_span);
+            Some(BlockItem::Assignment {
+                name,
+                value: value_idx,
+            })
+        }
+        ast::Item::Expression(expr) => {
+            let span = expr.syntax().text_range();
+            let value = lower_expression(ctx, Some(expr));
+            let idx = ctx.alloc(value, span);
+            Some(BlockItem::Expression(idx))
+        }
     }
 }
 

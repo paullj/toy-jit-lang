@@ -10,7 +10,7 @@ use crate::subst::Subst;
 use crate::types::{Type, TypeVar};
 use crate::unify::{UnifyError, unify};
 use crate::{InferState, InferWithState, InferenceResult};
-use hir::{Definition, ExprIdx, Expression, Item, Literal, TextRange};
+use hir::{BlockItem, Definition, ExprIdx, Expression, Item, Literal, TextRange};
 
 fn to_span(range: TextRange) -> SourceSpan {
     let start: usize = range.start().into();
@@ -111,6 +111,7 @@ impl<'a> InferCtx<'a> {
             Expression::VariableRef { name } => self.lookup(name, span),
             Expression::Infix { op, lhs, rhs } => self.infer_infix(*op, *lhs, *rhs),
             Expression::Prefix { op, expr } => self.infer_prefix(*op, *expr),
+            Expression::Block { items, tail } => self.infer_block(items, *tail),
         }
     }
 
@@ -160,6 +161,52 @@ impl<'a> InferCtx<'a> {
                 result
             }
         }
+    }
+
+    fn infer_block(&mut self, items: &[BlockItem], tail: Option<ExprIdx>) -> Type {
+        self.env.push_scope();
+
+        for item in items {
+            match item {
+                BlockItem::Definition { name, value } => {
+                    let (ty, _) = self.infer_expr_idx(*value);
+                    let ty = self.subst.apply(&ty);
+                    let scheme = Scheme::generalize(&self.env, &ty);
+                    self.env.insert(name.clone(), scheme);
+                }
+                BlockItem::Assignment { name, value } => {
+                    let (value_ty, span) = self.infer_expr_idx(*value);
+                    let scheme = self.env.lookup(name).cloned();
+                    match scheme {
+                        Some(scheme) => {
+                            let var_ty = scheme.instantiate(|| self.fresh_var());
+                            self.unify_or_error(&var_ty, &value_ty, span);
+                        }
+                        None => {
+                            self.diagnostics.push(InferDiagnostic::Undefined {
+                                name: name.clone(),
+                                span: to_span(span),
+                            });
+                        }
+                    }
+                }
+                BlockItem::Expression(idx) => {
+                    self.infer_expr_idx(*idx);
+                }
+            }
+        }
+
+        // Block type is the tail expression type, or Unit if no tail
+        let result = match tail {
+            Some(idx) => {
+                let (ty, _) = self.infer_expr_idx(idx);
+                ty
+            }
+            None => Type::Unit,
+        };
+
+        self.env.pop_scope();
+        result
     }
 
     fn lookup(&mut self, name: &str, span: TextRange) -> Type {

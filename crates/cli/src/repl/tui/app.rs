@@ -282,6 +282,14 @@ fn get_expr_type(expr: &hir::Expression, infer: &infer::InferenceResult) -> infe
             .get(name)
             .cloned()
             .unwrap_or(infer::Type::Integer),
+        hir::Expression::Block { tail, .. } => match tail {
+            Some(idx) => infer
+                .expression_types
+                .get(*idx)
+                .cloned()
+                .unwrap_or(infer::Type::Unit),
+            None => infer::Type::Unit,
+        },
     }
 }
 

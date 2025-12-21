@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hir::{Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp};
+use hir::{BlockItem, Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp};
 use infer::InferenceResult;
 
 use crate::ir::{Block, BlockId, Function, Inst, LocalId, Module, Operand, VReg};
@@ -17,7 +17,8 @@ struct LowerCtx<'a> {
     current_block: Block,
     next_vreg: u32,
     next_local: u32,
-    locals: HashMap<String, LocalId>,
+    /// Stack of scopes, each scope maps names to local IDs
+    local_scopes: Vec<HashMap<String, LocalId>>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -28,7 +29,17 @@ impl<'a> LowerCtx<'a> {
             current_block: Block::new(BlockId(0)),
             next_vreg: 0,
             next_local: 0,
-            locals: HashMap::new(),
+            local_scopes: vec![HashMap::new()], // Start with global scope
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.local_scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        if self.local_scopes.len() > 1 {
+            self.local_scopes.pop();
         }
     }
 
@@ -39,17 +50,23 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn alloc_local(&mut self, name: &str) -> LocalId {
-        if let Some(&id) = self.locals.get(name) {
-            return id;
-        }
+        // Always allocate a new local in the current scope
         let id = LocalId(self.next_local);
         self.next_local += 1;
-        self.locals.insert(name.to_string(), id);
+        if let Some(scope) = self.local_scopes.last_mut() {
+            scope.insert(name.to_string(), id);
+        }
         id
     }
 
     fn get_local(&self, name: &str) -> Option<LocalId> {
-        self.locals.get(name).copied()
+        // Search from innermost to outermost scope
+        for scope in self.local_scopes.iter().rev() {
+            if let Some(&id) = scope.get(name) {
+                return Some(id);
+            }
+        }
+        None
     }
 
     fn emit(&mut self, inst: Inst) {
@@ -110,6 +127,7 @@ impl<'a> LowerCtx<'a> {
                     Operand::IntConst(0)
                 }
             }
+            Expression::Block { items, tail } => self.lower_block(items, *tail),
         }
     }
 
@@ -266,6 +284,46 @@ impl<'a> LowerCtx<'a> {
 
         self.emit(inst);
         Operand::VReg(dst)
+    }
+
+    fn lower_block(&mut self, items: &[BlockItem], tail: Option<ExprIdx>) -> Operand {
+        self.push_scope();
+
+        // Lower all items in the block
+        for item in items {
+            match item {
+                BlockItem::Definition { name, value } => {
+                    let operand = self.lower_expr_idx(*value);
+                    let local = self.alloc_local(name);
+                    self.emit(Inst::StoreLocal {
+                        local,
+                        src: operand,
+                    });
+                }
+                BlockItem::Assignment { name, value } => {
+                    let operand = self.lower_expr_idx(*value);
+                    if let Some(local) = self.get_local(name) {
+                        self.emit(Inst::StoreLocal {
+                            local,
+                            src: operand,
+                        });
+                    }
+                }
+                BlockItem::Expression(idx) => {
+                    // Evaluate for side effects
+                    self.lower_expr_idx(*idx);
+                }
+            }
+        }
+
+        // Return the tail expression value, or Unit (represented as 0)
+        let result = match tail {
+            Some(idx) => self.lower_expr_idx(idx),
+            None => Operand::IntConst(0), // Unit
+        };
+
+        self.pop_scope();
+        result
     }
 
     fn finish(mut self) -> Module {

@@ -208,5 +208,13 @@ fn get_expr_type(expr: &Expression, inferred: &InferenceResult) -> Type {
             .get_variable_type(name)
             .cloned()
             .unwrap_or(Type::Integer),
+        Expression::Block { tail, .. } => match tail {
+            Some(idx) => inferred
+                .expression_types
+                .get(*idx)
+                .cloned()
+                .unwrap_or(Type::Unit),
+            None => Type::Unit,
+        },
     }
 }

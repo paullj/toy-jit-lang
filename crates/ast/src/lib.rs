@@ -76,6 +76,7 @@ pub enum Expression {
     Parenthesis(ParenthesisExpression),
     Prefix(PrefixExpression),
     VariableReference(VariableReference),
+    Block(BlockExpression),
 }
 
 impl Expression {
@@ -86,6 +87,7 @@ impl Expression {
             SyntaxKind::ParenthesisExpression => Self::Parenthesis(ParenthesisExpression(node)),
             SyntaxKind::PrefixExpression => Self::Prefix(PrefixExpression(node)),
             SyntaxKind::VariableReference => Self::VariableReference(VariableReference(node)),
+            SyntaxKind::BlockExpression => Self::Block(BlockExpression(node)),
             _ => return None,
         };
         Some(result)
@@ -98,6 +100,7 @@ impl Expression {
             Expression::Parenthesis(n) => n.syntax(),
             Expression::Prefix(n) => n.syntax(),
             Expression::VariableReference(n) => n.syntax(),
+            Expression::Block(n) => n.syntax(),
         }
     }
 }
@@ -309,6 +312,24 @@ impl TypeAnnotation {
             .children_with_tokens()
             .filter_map(SyntaxElement::into_token)
             .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+}
+
+ast_node!(BlockExpression, SyntaxKind::BlockExpression);
+
+impl BlockExpression {
+    /// All items (statements/expressions) inside the block
+    pub fn items(&self) -> impl Iterator<Item = Item> {
+        self.0.children().filter_map(Item::cast)
+    }
+
+    /// The final expression that determines the block's value.
+    /// Returns None if block is empty or ends with a definition/assignment.
+    pub fn tail(&self) -> Option<Expression> {
+        self.items().last().and_then(|item| match item {
+            Item::Expression(e) => Some(e),
+            _ => None,
+        })
     }
 }
 

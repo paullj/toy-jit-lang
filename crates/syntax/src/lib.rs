@@ -17,6 +17,8 @@ pub enum SyntaxKind {
     // Tokens - Brackets
     LeftParenthesis,
     RightParenthesis,
+    LeftBrace,
+    RightBrace,
 
     // Tokens - Punctuation
     Comma,
@@ -78,6 +80,7 @@ pub enum SyntaxKind {
     ParenthesisExpression,
     PrefixExpression,
     TypeAnnotation,
+    BlockExpression,
 }
 
 impl SyntaxKind {
@@ -103,6 +106,8 @@ impl From<TokenKind> for SyntaxKind {
             // Brackets
             TokenKind::LeftParenthesis => SyntaxKind::LeftParenthesis,
             TokenKind::RightParenthesis => SyntaxKind::RightParenthesis,
+            TokenKind::LeftBrace => SyntaxKind::LeftBrace,
+            TokenKind::RightBrace => SyntaxKind::RightBrace,
 
             // Punctuation
             TokenKind::Comma => SyntaxKind::Comma,

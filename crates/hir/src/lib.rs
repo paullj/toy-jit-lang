@@ -37,6 +37,18 @@ pub enum Expression {
     VariableRef {
         name: String,
     },
+    Block {
+        items: Vec<BlockItem>,
+        tail: Option<ExprIdx>,
+    },
+}
+
+/// Item inside a block expression
+#[derive(Debug, Clone)]
+pub enum BlockItem {
+    Definition { name: String, value: ExprIdx },
+    Assignment { name: String, value: ExprIdx },
+    Expression(ExprIdx),
 }
 
 #[derive(Debug, Clone)]

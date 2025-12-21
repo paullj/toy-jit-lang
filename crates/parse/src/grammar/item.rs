@@ -27,14 +27,12 @@ pub(crate) fn item(p: &mut Parser) -> Option<CompletedMarker> {
                     }
                 }
                 Some(TokenKind::Equals) => Some(variable_assignment(p, m)),
-                Some(k) if EXPR_FIRST.contains(k) => {
-                    // Identifier followed by expr token -> treat as expression
+                _ => {
+                    // Identifier possibly followed by operators -> treat as expression
+                    // inner_expression_with_binding_power handles operators and returns
+                    // just the VariableReference if there are none
                     let lhs = m.complete(p, SyntaxKind::VariableReference);
                     inner_expression_with_binding_power(p, lhs, 0)
-                }
-                _ => {
-                    // Just an identifier on its own -> variable reference
-                    Some(m.complete(p, SyntaxKind::VariableReference))
                 }
             }
         }

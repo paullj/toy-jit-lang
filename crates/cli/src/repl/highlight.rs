@@ -47,6 +47,8 @@ pub fn token_style(kind: TokenKind) -> Style {
         // Punctuation
         TokenKind::LeftParenthesis
         | TokenKind::RightParenthesis
+        | TokenKind::LeftBrace
+        | TokenKind::RightBrace
         | TokenKind::Comma
         | TokenKind::Colon => Style::default().fg(Color::DarkGray),
 

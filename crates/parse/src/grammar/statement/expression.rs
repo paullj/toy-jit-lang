@@ -59,7 +59,8 @@ const PREFIX_SET: TokenSet = TokenSet::new(&[TokenKind::Minus, TokenKind::Bang])
 pub(crate) const EXPR_FIRST: TokenSet = LITERAL_SET
     .union(TokenSet::single(TokenKind::Identifier))
     .union(PREFIX_SET)
-    .union(TokenSet::single(TokenKind::LeftParenthesis));
+    .union(TokenSet::single(TokenKind::LeftParenthesis))
+    .union(TokenSet::single(TokenKind::LeftBrace));
 
 /// Recovery set for expression parsing (skip to newline or expr start)
 const EXPR_RECOVERY: TokenSet = EXPR_FIRST.union(TokenSet::single(TokenKind::NewLine));
@@ -128,6 +129,7 @@ fn lhs(p: &mut Parser) -> Option<CompletedMarker> {
         Some(TokenKind::Identifier) => Some(variable_reference(p)),
         Some(TokenKind::Minus) | Some(TokenKind::Bang) => prefix_expression(p),
         Some(TokenKind::LeftParenthesis) => Some(parenthesis_expression(p)),
+        Some(TokenKind::LeftBrace) => Some(block_expression(p)),
         _ => {
             p.recover("expected expression", EXPR_RECOVERY);
             None
@@ -185,6 +187,42 @@ fn parenthesis_expression(p: &mut Parser) -> CompletedMarker {
     }
 
     m.complete(p, SyntaxKind::ParenthesisExpression)
+}
+
+fn block_expression(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::LeftBrace));
+
+    let m = p.start();
+    p.consume(); // eat '{'
+    p.enter_delimiter(); // newlines allowed inside braces
+
+    // Parse statements until '}'
+    while !p.at(TokenKind::RightBrace) && !p.is_at_end() {
+        // Skip newlines between statements
+        while p.eat(TokenKind::NewLine) {}
+
+        if p.at(TokenKind::RightBrace) {
+            break;
+        }
+
+        // Parse an item (definition, assignment, or expression)
+        if crate::grammar::item(p).is_none() {
+            break;
+        }
+    }
+
+    p.exit_delimiter();
+    if !p.eat(TokenKind::RightBrace) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "'}'".to_string(),
+            found,
+        });
+    }
+
+    m.complete(p, SyntaxKind::BlockExpression)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -37,6 +37,18 @@ category = "punctuation"
 textmate_scope = "punctuation.paren.close.toy"
 
 [[tokens]]
+name = "LeftBrace"
+literal = "{"
+category = "punctuation"
+textmate_scope = "punctuation.brace.open.toy"
+
+[[tokens]]
+name = "RightBrace"
+literal = "}"
+category = "punctuation"
+textmate_scope = "punctuation.brace.close.toy"
+
+[[tokens]]
 name = "Comma"
 literal = ","
 category = "punctuation"

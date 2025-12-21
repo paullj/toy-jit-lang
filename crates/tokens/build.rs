@@ -136,7 +136,11 @@ fn generate_token_kind(config: &TokensConfig) -> String {
         } else {
             token.name.to_lowercase().replace('_', " ")
         };
-        let escaped = display.replace('\\', "\\\\").replace('"', "\\\"");
+        let escaped = display
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('{', "{{")
+            .replace('}', "}}");
         code.push_str(&format!(
             "            TokenKind::{} => write!(f, \"{}\"),\n",
             token.name, escaped

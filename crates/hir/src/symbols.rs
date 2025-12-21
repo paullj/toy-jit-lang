@@ -36,14 +36,36 @@ impl Symbol {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SymbolTable {
-    symbols: HashMap<String, Symbol>,
+    /// Stack of scopes, innermost scope is last
+    scopes: Vec<HashMap<String, Symbol>>,
+}
+
+impl Default for SymbolTable {
+    fn default() -> Self {
+        Self {
+            scopes: vec![HashMap::new()], // Start with global scope
+        }
+    }
 }
 
 impl SymbolTable {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Push a new scope for block expressions
+    pub fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    /// Pop the current scope
+    pub fn pop_scope(&mut self) {
+        // Keep at least the global scope
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
     }
 
     pub fn define(
@@ -53,34 +75,54 @@ impl SymbolTable {
         def_span: TextRange,
         name_span: TextRange,
     ) {
-        self.symbols
-            .insert(name.clone(), Symbol::new(name, kind, def_span, name_span));
+        // Define in the current (innermost) scope
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.clone(), Symbol::new(name, kind, def_span, name_span));
+        }
     }
 
     pub fn add_reference(&mut self, name: &str, span: TextRange) {
-        if let Some(sym) = self.symbols.get_mut(name) {
-            sym.add_reference(span);
+        // Search from innermost to outermost scope
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(sym) = scope.get_mut(name) {
+                sym.add_reference(span);
+                return;
+            }
         }
     }
 
     pub fn get(&self, name: &str) -> Option<&Symbol> {
-        self.symbols.get(name)
+        // Search from innermost to outermost scope
+        for scope in self.scopes.iter().rev() {
+            if let Some(sym) = scope.get(name) {
+                return Some(sym);
+            }
+        }
+        None
     }
 
     pub fn get_mut(&mut self, name: &str) -> Option<&mut Symbol> {
-        self.symbols.get_mut(name)
+        // Search from innermost to outermost scope
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(sym) = scope.get_mut(name) {
+                return Some(sym);
+            }
+        }
+        None
     }
 
     /// Find symbol at a given byte offset
     pub fn symbol_at(&self, offset: u32) -> Option<&Symbol> {
         let offset = offset.into();
-        for symbol in self.symbols.values() {
-            if symbol.name_span.contains(offset) {
-                return Some(symbol);
-            }
-            for &ref_span in &symbol.references {
-                if ref_span.contains(offset) {
+        for scope in self.scopes.iter().rev() {
+            for symbol in scope.values() {
+                if symbol.name_span.contains(offset) {
                     return Some(symbol);
+                }
+                for &ref_span in &symbol.references {
+                    if ref_span.contains(offset) {
+                        return Some(symbol);
+                    }
                 }
             }
         }
@@ -88,6 +130,6 @@ impl SymbolTable {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Symbol)> {
-        self.symbols.iter()
+        self.scopes.iter().flat_map(|scope| scope.iter())
     }
 }
