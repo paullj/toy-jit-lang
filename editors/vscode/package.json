@@ -23,6 +23,13 @@
           "toy"
         ]
       }
+    ],
+    "grammars": [
+      {
+        "language": "toy",
+        "scopeName": "source.toy",
+        "path": "./syntaxes/toy.tmLanguage.json"
+      }
     ]
   },
   "dependencies": {

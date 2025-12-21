@@ -1,6 +1,10 @@
 use analyse::{Diagnostic, DiagnosticSeverity, Position, Range};
 use tower_lsp::lsp_types;
 
+pub fn from_lsp_position(pos: lsp_types::Position) -> Position {
+    Position::new(pos.line, pos.character)
+}
+
 pub fn to_lsp_position(pos: Position) -> lsp_types::Position {
     lsp_types::Position::new(pos.line, pos.character)
 }

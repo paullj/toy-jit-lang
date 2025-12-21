@@ -5,11 +5,11 @@ let client;
 
 function activate(context) {
   // Path to your compiled CLI binary
-  const serverPath = path.join(context.extensionPath, "..", "..", "target", "debug", "cli");
+  const serverPath = path.join(context.extensionPath, "..", "..", "target", "debug", "toy");
 
   const serverOptions = {
     command: serverPath,
-    args: ["--lsp"],
+    args: ["server"],
   };
 
   const clientOptions = {

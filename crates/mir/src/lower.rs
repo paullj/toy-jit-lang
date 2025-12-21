@@ -288,6 +288,7 @@ mod tests {
             expressions: Arena::new(),
             expr_spans: Default::default(),
             item_spans: vec![Default::default()],
+            symbols: Default::default(),
         }
     }
 

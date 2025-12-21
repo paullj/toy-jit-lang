@@ -1,6 +1,8 @@
 mod lower;
+mod symbols;
 
 pub use lower::{LowerResult, lower};
+pub use symbols::{Symbol, SymbolKind, SymbolTable};
 pub use syntax::TextRange;
 
 use la_arena::Idx;

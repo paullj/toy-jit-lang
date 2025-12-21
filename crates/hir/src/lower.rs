@@ -1,4 +1,7 @@
-use crate::{Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp};
+use crate::{
+    Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp, SymbolKind, SymbolTable,
+};
+use ast::AstNode;
 use la_arena::{Arena, ArenaMap};
 use syntax::{SyntaxKind, TextRange};
 
@@ -8,11 +11,13 @@ pub struct LowerResult {
     pub expressions: Arena<Expression>,
     pub expr_spans: ArenaMap<ExprIdx, TextRange>,
     pub item_spans: Vec<TextRange>,
+    pub symbols: SymbolTable,
 }
 
 struct Ctx {
     expressions: Arena<Expression>,
     expr_spans: ArenaMap<ExprIdx, TextRange>,
+    symbols: SymbolTable,
 }
 
 impl Ctx {
@@ -20,6 +25,7 @@ impl Ctx {
         Self {
             expressions: Arena::new(),
             expr_spans: ArenaMap::new(),
+            symbols: SymbolTable::new(),
         }
     }
 
@@ -27,6 +33,15 @@ impl Ctx {
         let idx = self.expressions.alloc(expr);
         self.expr_spans.insert(idx, span);
         idx
+    }
+
+    fn define_symbol(&mut self, name: String, def_span: TextRange, name_span: TextRange) {
+        self.symbols
+            .define(name, SymbolKind::Variable, def_span, name_span);
+    }
+
+    fn add_reference(&mut self, name: &str, span: TextRange) {
+        self.symbols.add_reference(name, span);
     }
 }
 
@@ -48,18 +63,27 @@ pub fn lower(root: ast::Root) -> LowerResult {
         expressions: ctx.expressions,
         expr_spans: ctx.expr_spans,
         item_spans,
+        symbols: ctx.symbols,
     }
 }
 
 fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
     match ast {
         ast::Item::VariableDefinition(def) => {
-            let name = def.name()?.text().to_string();
+            let name_token = def.name()?;
+            let name = name_token.text().to_string();
+            let def_span = def.syntax().text_range();
+            let name_span = name_token.text_range();
+            ctx.define_symbol(name.clone(), def_span, name_span);
             let value = lower_expression(ctx, def.value());
             Some(Item::Definition(Definition::Variable { name, value }))
         }
         ast::Item::VariableAssignment(asgn) => {
-            let name = asgn.name()?.text().to_string();
+            let name_token = asgn.name()?;
+            let name = name_token.text().to_string();
+            let name_span = name_token.text_range();
+            // Assignment is a reference to existing variable
+            ctx.add_reference(&name, name_span);
             let value = lower_expression(ctx, asgn.value());
             Some(Item::Assignment { name, value })
         }
@@ -81,10 +105,11 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
         ast::Expression::Parenthesis(paren) => lower_expression(ctx, paren.expression()),
         ast::Expression::Prefix(prefix) => lower_prefix(ctx, prefix),
         ast::Expression::VariableReference(var) => {
-            if let Some(name) = var.name() {
-                Expression::VariableRef {
-                    name: name.text().to_string(),
-                }
+            if let Some(name_token) = var.name() {
+                let name = name_token.text().to_string();
+                let ref_span = name_token.text_range();
+                ctx.add_reference(&name, ref_span);
+                Expression::VariableRef { name }
             } else {
                 Expression::Missing
             }

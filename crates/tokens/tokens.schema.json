@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tokens Configuration",
+  "description": "Token definitions for syntax highlighting generation",
+  "type": "object",
+  "required": ["meta", "tokens", "semantic_tokens"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "description": "Language metadata",
+      "required": ["name", "file_extensions", "scope_name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Language name"
+        },
+        "file_extensions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "File extensions (e.g., [\".toy\"])"
+        },
+        "scope_name": {
+          "type": "string",
+          "description": "TextMate scope name (e.g., \"source.toy\")"
+        }
+      }
+    },
+    "tokens": {
+      "type": "array",
+      "description": "Token definitions",
+      "items": {
+        "type": "object",
+        "required": ["name", "category"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Token variant name (PascalCase)"
+          },
+          "literal": {
+            "type": "string",
+            "description": "Exact string to match (mutually exclusive with regex)"
+          },
+          "regex": {
+            "type": "string",
+            "description": "Regex pattern to match (mutually exclusive with literal)"
+          },
+          "category": {
+            "type": "string",
+            "enum": ["trivia", "punctuation", "operator", "keyword", "identifier", "number", "string"],
+            "description": "Token category for semantic grouping"
+          },
+          "textmate_scope": {
+            "type": "string",
+            "description": "TextMate scope for syntax highlighting (e.g., \"keyword.operator.toy\")"
+          }
+        },
+        "oneOf": [
+          { "required": ["literal"] },
+          { "required": ["regex"] }
+        ]
+      }
+    },
+    "semantic_tokens": {
+      "type": "object",
+      "description": "Maps category names to LSP semantic token types",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["keyword", "operator", "number", "string", "variable", "punctuation", "comment", "type", "function", "parameter", "property"]
+      }
+    }
+  }
+}

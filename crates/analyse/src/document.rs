@@ -1,12 +1,17 @@
 use ast::AstNode;
-use hir::LowerResult;
-use infer::InferenceResult;
+use hir::{LowerResult, Symbol};
+use infer::{InferenceResult, Type};
 use parse::ParseError;
 
 use crate::diagnostics::{Diagnostic, convert_infer_diagnostic, convert_parse_error};
-use crate::line_index::LineIndex;
+use crate::line_index::{LineIndex, Position};
 
 /// Cached analysis state for source text.
+///
+/// Currently uses full reparse on each change. Future incremental improvements:
+/// - Store GreenNode for efficient tree sharing
+/// - Track which items are affected by edits
+/// - Re-lower/re-infer only changed items
 #[derive(Debug)]
 pub struct Document {
     pub text: String,
@@ -35,6 +40,23 @@ impl Document {
             lower_result,
             infer_result,
         }
+    }
+
+    /// Find symbol at a given LSP position.
+    pub fn symbol_at(&self, pos: Position) -> Option<&Symbol> {
+        let offset = self.line_index.offset(pos);
+        self.lower_result.as_ref()?.symbols.symbol_at(offset)
+    }
+
+    /// Get the type of a symbol (if type inference succeeded).
+    pub fn type_of_symbol(&self, symbol: &Symbol) -> Option<&Type> {
+        self.infer_result.as_ref()?.get_variable_type(&symbol.name)
+    }
+
+    /// Get type at position (convenience combining symbol_at + type_of_symbol).
+    pub fn type_at(&self, pos: Position) -> Option<&Type> {
+        let symbol = self.symbol_at(pos)?;
+        self.type_of_symbol(symbol)
     }
 
     /// Get all diagnostics (parse + type errors).

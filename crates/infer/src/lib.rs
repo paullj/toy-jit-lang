@@ -82,6 +82,7 @@ mod tests {
             expressions: Default::default(),
             expr_spans: Default::default(),
             item_spans,
+            symbols: Default::default(),
         }
     }
 
