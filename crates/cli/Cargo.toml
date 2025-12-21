@@ -20,6 +20,7 @@ infer = { path = "../infer" }
 mir = { path = "../mir" }
 jit = { path = "../jit" }
 compile = { path = "../compile" }
+vm = { path = "../vm" }
 analyse = { path = "../analyse" }
 lsp = { path = "../lsp" }
 termcolor = "1.4.1"

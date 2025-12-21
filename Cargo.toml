@@ -11,6 +11,8 @@ members = [
     "crates/mir",
     "crates/jit",
     "crates/compile",
+    "crates/vm",
+    "crates/wasm",
     "crates/analyse",
     "crates/lsp",
     "crates/cli",

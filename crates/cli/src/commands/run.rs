@@ -31,16 +31,20 @@ struct TypeErrors {
 pub struct RunCmd {
     /// Script to run
     pub script: PathBuf,
+
+    /// Use bytecode VM instead of JIT compiler
+    #[arg(long)]
+    pub vm: bool,
 }
 
 impl RunCmd {
     pub fn run(self) -> Result<()> {
         let src = std::fs::read_to_string(&self.script).map_err(|e| miette::miette!("{e}"))?;
-        process(&src)
+        process(&src, self.vm)
     }
 }
 
-pub fn process(src: &str) -> Result<()> {
+pub fn process(src: &str, use_vm: bool) -> Result<()> {
     let (tree, errors) = parse::parse(src);
     if !errors.is_empty() {
         return Err(ParseErrors {
@@ -63,43 +67,50 @@ pub fn process(src: &str) -> Result<()> {
     }
 
     let mir_module = mir::lower(&lower, &inferred);
-    let result_type = lower
-        .items
-        .last()
-        .map(|item| get_item_type(item, &inferred));
 
-    let jit_ret_type = match result_type {
-        Some(Type::Float) => jit::ReturnType::Float,
-        Some(Type::Boolean) => jit::ReturnType::Boolean,
-        _ => jit::ReturnType::Integer,
-    };
+    if use_vm {
+        let compiled = compile::compile(&mir_module);
+        let result = vm::run(&compiled).map_err(|e| miette::miette!("{e}"))?;
+        println!("{}", result);
+    } else {
+        let result_type = lower
+            .items
+            .last()
+            .map(|item| get_item_type(item, &inferred));
 
-    let mut jit_compiler = jit::Jit::new();
-    let ptr = jit_compiler
-        .compile(&mir_module.main, jit_ret_type)
-        .map_err(|e| miette::miette!("{e}"))?;
+        let jit_ret_type = match result_type {
+            Some(Type::Float) => jit::ReturnType::Float,
+            Some(Type::Boolean) => jit::ReturnType::Boolean,
+            _ => jit::ReturnType::Integer,
+        };
 
-    match result_type {
-        Some(Type::Float) => {
-            let result: f64 = unsafe {
-                let func: fn() -> f64 = std::mem::transmute(ptr);
-                func()
-            };
-            println!("{}", result);
-        }
-        Some(Type::Boolean) => {
-            let result: i64 = unsafe {
-                let func: fn() -> i64 = std::mem::transmute(ptr);
-                func()
-            };
-            println!("{}", if result != 0 { "true" } else { "false" });
-        }
-        _ => {
-            let result: i64 = unsafe {
-                let func: fn() -> i64 = std::mem::transmute(ptr);
-                func()
-            };
-            println!("{}", result);
+        let mut jit_compiler = jit::Jit::new();
+        let ptr = jit_compiler
+            .compile(&mir_module.main, jit_ret_type)
+            .map_err(|e| miette::miette!("{e}"))?;
+
+        match result_type {
+            Some(Type::Float) => {
+                let result: f64 = unsafe {
+                    let func: fn() -> f64 = std::mem::transmute(ptr);
+                    func()
+                };
+                println!("{}", result);
+            }
+            Some(Type::Boolean) => {
+                let result: i64 = unsafe {
+                    let func: fn() -> i64 = std::mem::transmute(ptr);
+                    func()
+                };
+                println!("{}", if result != 0 { "true" } else { "false" });
+            }
+            _ => {
+                let result: i64 = unsafe {
+                    let func: fn() -> i64 = std::mem::transmute(ptr);
+                    func()
+                };
+                println!("{}", result);
+            }
         }
     }
 
