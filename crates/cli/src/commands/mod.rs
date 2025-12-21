@@ -1,9 +1,11 @@
+mod bench;
 mod build;
 mod repl;
 mod run;
 mod server;
 mod stubs;
 
+pub use bench::BenchCmd;
 pub use build::BuildCmd;
 pub use repl::run_repl;
 pub use run::RunCmd;

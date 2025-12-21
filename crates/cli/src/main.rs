@@ -8,8 +8,8 @@ use clap::{Parser, Subcommand};
 use miette::Result;
 
 use commands::{
-    AddCmd, BuildCmd, DocsCmd, FormatCmd, LintCmd, ListCmd, NewCmd, RemoveCmd, RunCmd, ServerCmd,
-    TestCmd, UpdateCmd, run_repl,
+    AddCmd, BenchCmd, BuildCmd, DocsCmd, FormatCmd, LintCmd, ListCmd, NewCmd, RemoveCmd, RunCmd,
+    ServerCmd, TestCmd, UpdateCmd, run_repl,
 };
 use styles::STYLES;
 
@@ -37,6 +37,9 @@ enum Command {
     /// Build a script or project
     #[command(display_order = 2)]
     Build(BuildCmd),
+    /// Benchmark execution modes
+    #[command(display_order = 3)]
+    Bench(BenchCmd),
 
     /// Run tests
     #[command(display_order = 10)]
@@ -79,6 +82,7 @@ fn main() -> Result<()> {
         None => run_repl(),
         Some(Command::Run(cmd)) => cmd.run(),
         Some(Command::Build(cmd)) => cmd.run(),
+        Some(Command::Bench(cmd)) => cmd.run(),
         Some(Command::Test(cmd)) => cmd.run(),
         Some(Command::Format(cmd)) => cmd.run(),
         Some(Command::Lint(cmd)) => cmd.run(),

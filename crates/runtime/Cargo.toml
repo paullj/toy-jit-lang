@@ -1,0 +1,13 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mir = { path = "../mir" }
+jit = { path = "../jit" }
+compile = { path = "../compile" }
+vm = { path = "../vm" }
+infer = { path = "../infer" }
+hir = { path = "../hir" }
+thiserror = "2.0"

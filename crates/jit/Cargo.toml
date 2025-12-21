@@ -5,9 +5,9 @@ edition = "2024"
 
 [dependencies]
 mir = { path = "../mir" }
-cranelift = "0.116"
-cranelift-jit = "0.116"
-cranelift-module = "0.116"
-cranelift-native = "0.116"
+cranelift = "0.126.1"
+cranelift-jit = "0.126.1"
+cranelift-module = "0.126.1"
+cranelift-native = "0.126.1"
 target-lexicon = "0.13"
 thiserror = "2"

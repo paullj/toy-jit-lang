@@ -61,8 +61,7 @@ impl<'a> FunctionTranslator<'a> {
         }
 
         for i in 0..func.local_count {
-            let var = Variable::new(i as usize);
-            self.builder.declare_var(var, self.int_type);
+            let var = self.builder.declare_var(self.int_type);
             let zero = self.builder.ins().iconst(self.int_type, 0);
             self.builder.def_var(var, zero);
             self.locals.insert(LocalId(i), var);

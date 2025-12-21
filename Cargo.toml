@@ -12,6 +12,7 @@ members = [
     "crates/jit",
     "crates/compile",
     "crates/vm",
+    "crates/runtime",
     "crates/wasm",
     "crates/analyse",
     "crates/lsp",
