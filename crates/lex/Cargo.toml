@@ -4,6 +4,7 @@ authors = ["Paul Lavender-Jones <paul@lavender-jones.com>"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+publish = false
 
 
 [dependencies]

@@ -1,3 +1,6 @@
+// TODO: Move this out to some other crate... feels a bit out of place in `infer`.
+// TODO: Only
+
 /// Compute Levenshtein distance between two strings
 pub fn levenshtein(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();

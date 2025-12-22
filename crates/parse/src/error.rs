@@ -46,9 +46,7 @@ pub enum ParseError {
 
     #[error("unexpected semicolon")]
     #[diagnostic(code("parse:unnecessary_semicolon"))]
-    #[diagnostic(help(
-        "semicolons are not needed in this language - statements are separated by newlines"
-    ))]
+    #[diagnostic(help("semicolons are not needed - statements are separated by newlines"))]
     UnnecessarySemicolon {
         #[label("not needed")]
         at: SourceSpan,
