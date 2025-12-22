@@ -20,6 +20,8 @@ pub enum InferDiagnostic {
         name: String,
         #[label("not found in scope")]
         span: SourceSpan,
+        #[help]
+        suggestion: Option<String>,
     },
 
     #[error("infinite type: `{var}` occurs in `{ty}`")]
@@ -37,6 +39,44 @@ pub enum InferDiagnostic {
         expected: usize,
         found: usize,
         #[label("wrong number of arguments")]
+        span: SourceSpan,
+    },
+
+    #[error("operator `{op}` is for `{expected_type}`, but operands are `{actual_type}`")]
+    #[diagnostic(code(infer::wrong_operator))]
+    WrongOperator {
+        op: String,
+        expected_type: String,
+        actual_type: String,
+        #[label("wrong operator for this type")]
+        span: SourceSpan,
+        #[help]
+        suggest_op: String,
+    },
+
+    #[error("division by zero")]
+    #[diagnostic(code(infer::division_by_zero))]
+    DivisionByZero {
+        #[label("divisor is zero")]
+        span: SourceSpan,
+    },
+
+    #[error("literal `{value}` overflows type `{ty}`")]
+    #[diagnostic(code(infer::overflow_literal))]
+    OverflowLiteral {
+        value: String,
+        ty: String,
+        #[label("value too large for type")]
+        span: SourceSpan,
+    },
+
+    #[error("assigning empty block to variable")]
+    #[diagnostic(code(infer::empty_block_assignment))]
+    #[diagnostic(help(
+        "empty blocks have type `()` (unit). Did you mean to have an expression in the block?"
+    ))]
+    EmptyBlockAssignment {
+        #[label("empty block")]
         span: SourceSpan,
     },
 }

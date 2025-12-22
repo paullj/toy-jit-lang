@@ -28,6 +28,7 @@ impl<'a> Iterator for Lexer<'a> {
             })),
             Err(_) => Some(Err(Error::InvalidToken {
                 at: self.inner.span().into(),
+                text: self.inner.slice().to_string(),
             })),
         }
     }
@@ -70,7 +71,13 @@ mod tests {
     fn invalid_token_error() {
         let results: Vec<_> = Lexer::new("a ? b").collect();
         let err = results.iter().find_map(|r| r.as_ref().err());
-        assert_eq!(*err.unwrap(), Error::InvalidToken { at: (2..3).into() });
+        assert_eq!(
+            *err.unwrap(),
+            Error::InvalidToken {
+                at: (2..3).into(),
+                text: "?".to_string()
+            }
+        );
     }
 
     #[test]

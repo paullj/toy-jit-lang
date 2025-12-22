@@ -4,6 +4,7 @@ mod env;
 mod ops;
 mod scheme;
 mod subst;
+mod suggest;
 pub mod types;
 mod unify;
 

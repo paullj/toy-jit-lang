@@ -93,16 +93,15 @@ pub(crate) fn inner_expression_with_binding_power(
             break;
         }
 
+        let op_text = op.symbol();
         p.consume(); // eat operator
 
-        // After operator, check if newline terminates (trailing operator error)
-        if p.at_newline_terminator() {
+        // After operator, check if newline terminates or EOF (incomplete expression)
+        if p.at_newline_terminator() || p.is_at_end() {
             let span = p.current_span();
-            let found = p.current().map(|k| k.to_string());
-            p.error(crate::ParseError::UnexpectedToken {
+            p.error(crate::ParseError::IncompleteExpression {
                 at: span.into(),
-                expected: "expression after operator".to_string(),
-                found,
+                operator: op_text.to_string(),
             });
             // Complete partial infix expression
             lhs = lhs.precede(p).complete(p, SyntaxKind::InfixExpression);
@@ -114,8 +113,12 @@ pub(crate) fn inner_expression_with_binding_power(
         lhs = marker.complete(p, SyntaxKind::InfixExpression);
 
         if !parsed_rhs {
-            // Recovery: skip to expr start
-            p.recover("expected expression", EXPR_RECOVERY);
+            // Incomplete expression - no RHS found
+            let span = p.current_span();
+            p.error(crate::ParseError::IncompleteExpression {
+                at: span.into(),
+                operator: op_text.to_string(),
+            });
             break;
         }
     }
@@ -294,6 +297,33 @@ impl TryFrom<TokenKind> for Operator {
 }
 
 impl Operator {
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Asterisk => "*",
+            Self::Slash => "/",
+            Self::Percent => "%",
+            Self::PlusDot => "+.",
+            Self::MinusDot => "-.",
+            Self::AsteriskDot => "*.",
+            Self::SlashDot => "/.",
+            Self::EqualsEquals => "==",
+            Self::NotEquals => "!=",
+            Self::GreaterThan => ">",
+            Self::LessThan => "<",
+            Self::GreaterThanOrEqual => ">=",
+            Self::LessThanOrEqual => "<=",
+            Self::GreaterThanDot => ">.",
+            Self::LessThanDot => "<.",
+            Self::GreaterThanOrEqualDot => ">=.",
+            Self::LessThanOrEqualDot => "<=.",
+            Self::And => "and",
+            Self::Or => "or",
+            Self::Bang => "!",
+        }
+    }
+
     pub fn prefix_binding_power(&self) -> Option<((), u8)> {
         let result = match &self {
             Self::Bang | Self::Minus => ((), 15),

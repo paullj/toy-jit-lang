@@ -1,3 +1,5 @@
+#![allow(unused_assignments)] // false positive from thiserror derive on Error::InvalidToken.text
+
 mod error;
 mod lexer;
 mod token;

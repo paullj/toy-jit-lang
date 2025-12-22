@@ -7,10 +7,11 @@ use crate::env::TypeEnv;
 use crate::ops;
 use crate::scheme::Scheme;
 use crate::subst::Subst;
+use crate::suggest::find_similar;
 use crate::types::{Type, TypeVar};
 use crate::unify::{UnifyError, unify};
 use crate::{InferState, InferWithState, InferenceResult};
-use hir::{BlockItem, Definition, ExprIdx, Expression, Item, Literal, TextRange};
+use hir::{BlockItem, Definition, ExprIdx, Expression, InfixOp, Item, Literal, TextRange};
 
 fn to_span(range: TextRange) -> SourceSpan {
     let start: usize = range.start().into();
@@ -75,6 +76,17 @@ impl<'a> InferCtx<'a> {
     fn infer_item(&mut self, item: &Item, span: TextRange) {
         match item {
             Item::Definition(Definition::Variable { name, value }) => {
+                // Check for empty block assignment
+                if let Expression::Block { items, tail } = value
+                    && items.is_empty()
+                    && tail.is_none()
+                {
+                    self.diagnostics
+                        .push(InferDiagnostic::EmptyBlockAssignment {
+                            span: to_span(span),
+                        });
+                }
+
                 let ty = self.infer_expr(value, span);
                 // Apply current substitution before generalizing
                 let ty = self.subst.apply(&ty);
@@ -91,9 +103,19 @@ impl<'a> InferCtx<'a> {
                         self.unify_or_error(&var_ty, &value_ty, span);
                     }
                     None => {
+                        // Check for similar names first
+                        let suggestion =
+                            find_similar(name, self.env.iter().map(|(n, _)| n.as_str()), 2);
+                        // If no similar name found, suggest using := to define
+                        let suggestion = suggestion.or_else(|| {
+                            Some(format!(
+                                "use `:=` to define a new variable: `{name} := ...`"
+                            ))
+                        });
                         self.diagnostics.push(InferDiagnostic::Undefined {
                             name: name.clone(),
                             span: to_span(span),
+                            suggestion,
                         });
                     }
                 }
@@ -127,6 +149,47 @@ impl<'a> InferCtx<'a> {
         let sig = ops::infix_signature(op);
         let (lhs_ty, lhs_span) = self.infer_expr_idx(lhs);
         let (rhs_ty, rhs_span) = self.infer_expr_idx(rhs);
+
+        // Check for division by zero
+        if matches!(op, InfixOp::Div | InfixOp::DivFloat | InfixOp::Mod)
+            && self.is_zero_literal(rhs)
+        {
+            self.diagnostics.push(InferDiagnostic::DivisionByZero {
+                span: to_span(rhs_span),
+            });
+        }
+
+        // Check for wrong operator (int op on floats or float op on ints)
+        let lhs_resolved = self.subst.apply(&lhs_ty);
+        let rhs_resolved = self.subst.apply(&rhs_ty);
+
+        // Only emit WrongOperator if both operands have same type but wrong for operator
+        if lhs_resolved == rhs_resolved && lhs_resolved != sig.operand {
+            // Check if there's a suggested operator
+            let suggested = if sig.operand == Type::Integer && lhs_resolved == Type::Float {
+                ops::int_to_float_op(op)
+            } else if sig.operand == Type::Float && lhs_resolved == Type::Integer {
+                ops::float_to_int_op(op)
+            } else {
+                None
+            };
+
+            if let Some(suggest_op) = suggested {
+                let op_span = self.hir.expr_spans.get(lhs).copied().unwrap_or_default();
+                self.diagnostics.push(InferDiagnostic::WrongOperator {
+                    op: ops::op_symbol(op).to_string(),
+                    expected_type: sig.operand.to_string(),
+                    actual_type: lhs_resolved.to_string(),
+                    span: to_span(op_span),
+                    suggest_op: format!(
+                        "use `{}` for {} operations",
+                        ops::op_symbol(suggest_op),
+                        lhs_resolved
+                    ),
+                });
+                return sig.result;
+            }
+        }
 
         self.unify_or_error(&lhs_ty, &sig.operand, lhs_span);
         self.unify_or_error(&rhs_ty, &sig.operand, rhs_span);
@@ -183,9 +246,17 @@ impl<'a> InferCtx<'a> {
                             self.unify_or_error(&var_ty, &value_ty, span);
                         }
                         None => {
+                            let suggestion =
+                                find_similar(name, self.env.iter().map(|(n, _)| n.as_str()), 2);
+                            let suggestion = suggestion.or_else(|| {
+                                Some(format!(
+                                    "use `:=` to define a new variable: `{name} := ...`"
+                                ))
+                            });
                             self.diagnostics.push(InferDiagnostic::Undefined {
                                 name: name.clone(),
                                 span: to_span(span),
+                                suggestion,
                             });
                         }
                     }
@@ -215,12 +286,22 @@ impl<'a> InferCtx<'a> {
         match scheme {
             Some(scheme) => scheme.instantiate(|| self.fresh_var()),
             None => {
+                let suggestion = find_similar(name, self.env.iter().map(|(n, _)| n.as_str()), 2);
                 self.diagnostics.push(InferDiagnostic::Undefined {
                     name: name.to_string(),
                     span: to_span(span),
+                    suggestion,
                 });
                 Type::Error
             }
+        }
+    }
+
+    fn is_zero_literal(&self, idx: ExprIdx) -> bool {
+        match &self.hir.expressions[idx] {
+            Expression::Literal(Literal::Integer(0)) => true,
+            Expression::Literal(Literal::Float(f)) if *f == 0.0 => true,
+            _ => false,
         }
     }
 
