@@ -123,6 +123,11 @@ impl<'a> InferCtx<'a> {
             Expression::Infix { op, lhs, rhs } => self.infer_infix(*op, *lhs, *rhs),
             Expression::Prefix { op, expr } => self.infer_prefix(*op, *expr),
             Expression::Block { items, tail } => self.infer_block(items, *tail),
+            Expression::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => self.infer_if(*condition, *then_branch, *else_branch),
         }
     }
 
@@ -258,6 +263,22 @@ impl<'a> InferCtx<'a> {
 
         self.env.pop_scope();
         result
+    }
+
+    fn infer_if(&mut self, cond: ExprIdx, then_br: ExprIdx, else_br: Option<ExprIdx>) -> Type {
+        let (cond_ty, cond_span) = self.infer_expr_idx(cond);
+        self.unify_or_error(&cond_ty, &Type::Boolean, cond_span);
+
+        let (then_ty, _) = self.infer_expr_idx(then_br);
+
+        match else_br {
+            Some(idx) => {
+                let (else_ty, else_span) = self.infer_expr_idx(idx);
+                self.unify_or_error(&then_ty, &else_ty, else_span);
+                then_ty
+            }
+            None => Type::Unit,
+        }
     }
 
     fn lookup(&mut self, name: &str, span: TextRange) -> Type {

@@ -77,6 +77,7 @@ pub enum Expression {
     Prefix(PrefixExpression),
     VariableReference(VariableReference),
     Block(BlockExpression),
+    If(IfExpression),
 }
 
 impl Expression {
@@ -88,6 +89,7 @@ impl Expression {
             SyntaxKind::PrefixExpression => Self::Prefix(PrefixExpression(node)),
             SyntaxKind::VariableReference => Self::VariableReference(VariableReference(node)),
             SyntaxKind::BlockExpression => Self::Block(BlockExpression(node)),
+            SyntaxKind::IfExpression => Self::If(IfExpression(node)),
             _ => return None,
         };
         Some(result)
@@ -101,6 +103,7 @@ impl Expression {
             Expression::Prefix(n) => n.syntax(),
             Expression::VariableReference(n) => n.syntax(),
             Expression::Block(n) => n.syntax(),
+            Expression::If(n) => n.syntax(),
         }
     }
 }
@@ -330,6 +333,57 @@ impl BlockExpression {
             Item::Expression(e) => Some(e),
             _ => None,
         })
+    }
+}
+
+ast_node!(IfExpression, SyntaxKind::IfExpression);
+
+impl IfExpression {
+    /// The condition expression
+    pub fn condition(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// The then branch (block expression)
+    pub fn then_branch(&self) -> Option<BlockExpression> {
+        self.0.children().find_map(|n| {
+            if n.kind() == SyntaxKind::BlockExpression {
+                Some(BlockExpression(n))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// The else branch (either a block or another if expression)
+    pub fn else_branch(&self) -> Option<ElseBranch> {
+        let mut children = self.0.children();
+        // Skip condition expression
+        children.next();
+        // Skip then block
+        children.find(|n| n.kind() == SyntaxKind::BlockExpression)?;
+        // Next child is the else branch (if present)
+        let else_node = children.next()?;
+        match else_node.kind() {
+            SyntaxKind::BlockExpression => Some(ElseBranch::Block(BlockExpression(else_node))),
+            SyntaxKind::IfExpression => Some(ElseBranch::ElseIf(IfExpression(else_node))),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ElseBranch {
+    Block(BlockExpression),
+    ElseIf(IfExpression),
+}
+
+impl ElseBranch {
+    pub fn syntax(&self) -> &SyntaxNode {
+        match self {
+            ElseBranch::Block(b) => b.syntax(),
+            ElseBranch::ElseIf(i) => i.syntax(),
+        }
     }
 }
 

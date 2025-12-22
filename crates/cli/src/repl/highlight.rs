@@ -21,6 +21,9 @@ pub fn token_style(kind: TokenKind) -> Style {
             Style::default().fg(Color::Magenta)
         }
 
+        // Control flow keywords
+        TokenKind::If | TokenKind::Else => Style::default().fg(Color::Magenta),
+
         // Operators
         TokenKind::Plus
         | TokenKind::Minus

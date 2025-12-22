@@ -222,6 +222,18 @@ literal = "false"
 category = "keyword"
 textmate_scope = "constant.language.boolean.toy"
 
+[[tokens]]
+name = "If"
+literal = "if"
+category = "keyword"
+textmate_scope = "keyword.control.conditional.toy"
+
+[[tokens]]
+name = "Else"
+literal = "else"
+category = "keyword"
+textmate_scope = "keyword.control.conditional.toy"
+
 # Literals
 [[tokens]]
 name = "Identifier"

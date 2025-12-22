@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use mir::{Inst, LocalId, Module, Operand, VReg};
+use mir::{BlockId, Inst, LocalId, Module, Operand, VReg};
 
-use crate::bytecode::{Instruction, LocalSlot, Reg};
+use crate::bytecode::{Instruction, Label, LocalSlot, Reg};
 use crate::chunk::{Chunk, CompiledModule};
 
 pub fn compile(mir: &Module) -> CompiledModule {
@@ -15,6 +15,10 @@ struct Compiler {
     chunk: Chunk,
     vreg_to_reg: HashMap<VReg, Reg>,
     next_reg: u32,
+    block_labels: HashMap<BlockId, Label>,
+    next_label: u32,
+    /// Pending label patches: (instruction_index, label)
+    label_patches: Vec<(usize, Label)>,
 }
 
 impl Compiler {
@@ -23,7 +27,20 @@ impl Compiler {
             chunk: Chunk::new(),
             vreg_to_reg: HashMap::new(),
             next_reg: 0,
+            block_labels: HashMap::new(),
+            next_label: 0,
+            label_patches: Vec::new(),
         }
+    }
+
+    fn get_or_create_label(&mut self, block_id: BlockId) -> Label {
+        if let Some(&label) = self.block_labels.get(&block_id) {
+            return label;
+        }
+        let label = Label(self.next_label);
+        self.next_label += 1;
+        self.block_labels.insert(block_id, label);
+        label
     }
 
     fn alloc_reg(&mut self) -> Reg {
@@ -48,9 +65,29 @@ impl Compiler {
     fn compile_function(&mut self, func: &mir::Function) {
         self.chunk.local_count = func.local_count;
 
+        // First pass: assign labels to blocks and emit code
+        let mut label_positions: HashMap<Label, usize> = HashMap::new();
+
         for block in &func.blocks {
+            // Record the position for this block's label
+            let label = self.get_or_create_label(block.id);
+            label_positions.insert(label, self.chunk.instructions.len());
+
             for inst in &block.insts {
                 self.compile_inst(inst);
+            }
+        }
+
+        // Second pass: patch jump targets with absolute positions
+        for (inst_idx, label) in &self.label_patches {
+            if let Some(&target_pos) = label_positions.get(label) {
+                let patched_label = Label(target_pos as u32);
+                match &mut self.chunk.instructions[*inst_idx] {
+                    Instruction::Jump { target } => *target = patched_label,
+                    Instruction::JumpIf { target, .. } => *target = patched_label,
+                    Instruction::JumpIfNot { target, .. } => *target = patched_label,
+                    _ => {}
+                }
             }
         }
 
@@ -283,9 +320,37 @@ impl Compiler {
                 });
             }
 
-            Inst::Jump { .. } | Inst::Branch { .. } => {
-                // Control flow not yet implemented
-                // Would need label resolution
+            Inst::Jump { target } => {
+                let label = self.get_or_create_label(*target);
+                let inst_idx = self.chunk.instructions.len();
+                self.emit(Instruction::Jump {
+                    target: Label(0), // Placeholder
+                });
+                self.label_patches.push((inst_idx, label));
+            }
+            Inst::Branch {
+                cond,
+                then_bb,
+                else_bb,
+            } => {
+                let cond_reg = self.load_operand(cond);
+                let then_label = self.get_or_create_label(*then_bb);
+                let else_label = self.get_or_create_label(*else_bb);
+
+                // JumpIf cond -> then_bb
+                let inst_idx = self.chunk.instructions.len();
+                self.emit(Instruction::JumpIf {
+                    cond: cond_reg,
+                    target: Label(0), // Placeholder
+                });
+                self.label_patches.push((inst_idx, then_label));
+
+                // Jump -> else_bb
+                let inst_idx = self.chunk.instructions.len();
+                self.emit(Instruction::Jump {
+                    target: Label(0), // Placeholder
+                });
+                self.label_patches.push((inst_idx, else_label));
             }
 
             Inst::Return { .. } => {

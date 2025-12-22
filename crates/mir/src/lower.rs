@@ -17,6 +17,7 @@ struct LowerCtx<'a> {
     current_block: Block,
     next_vreg: u32,
     next_local: u32,
+    next_block: u32,
     /// Stack of scopes, each scope maps names to local IDs
     local_scopes: Vec<HashMap<String, LocalId>>,
 }
@@ -29,7 +30,24 @@ impl<'a> LowerCtx<'a> {
             current_block: Block::new(BlockId(0)),
             next_vreg: 0,
             next_local: 0,
+            next_block: 1,                      // 0 is the entry block
             local_scopes: vec![HashMap::new()], // Start with global scope
+        }
+    }
+
+    fn create_block(&mut self) -> BlockId {
+        let id = BlockId(self.next_block);
+        self.next_block += 1;
+        id
+    }
+
+    fn switch_to_block(&mut self, id: BlockId) {
+        // Save current block if it has instructions
+        if !self.current_block.insts.is_empty() || self.current_block.id.0 != id.0 {
+            let old_block = std::mem::replace(&mut self.current_block, Block::new(id));
+            self.func.blocks.push(old_block);
+        } else {
+            self.current_block = Block::new(id);
         }
     }
 
@@ -128,6 +146,11 @@ impl<'a> LowerCtx<'a> {
                 }
             }
             Expression::Block { items, tail } => self.lower_block(items, *tail),
+            Expression::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => self.lower_if(*condition, *then_branch, *else_branch),
         }
     }
 
@@ -324,6 +347,46 @@ impl<'a> LowerCtx<'a> {
 
         self.pop_scope();
         result
+    }
+
+    fn lower_if(&mut self, cond: ExprIdx, then_br: ExprIdx, else_br: Option<ExprIdx>) -> Operand {
+        let cond_op = self.lower_expr_idx(cond);
+
+        let then_bb = self.create_block();
+        let else_bb = self.create_block();
+        let merge_bb = self.create_block();
+        let result = self.fresh_vreg();
+
+        // Emit branch
+        self.emit(Inst::Branch {
+            cond: cond_op,
+            then_bb,
+            else_bb,
+        });
+
+        // Then branch
+        self.switch_to_block(then_bb);
+        let then_val = self.lower_expr_idx(then_br);
+        self.emit(Inst::Copy {
+            dst: result,
+            src: then_val,
+        });
+        self.emit(Inst::Jump { target: merge_bb });
+
+        // Else branch
+        self.switch_to_block(else_bb);
+        let else_val = else_br
+            .map(|e| self.lower_expr_idx(e))
+            .unwrap_or(Operand::IntConst(0)); // Unit
+        self.emit(Inst::Copy {
+            dst: result,
+            src: else_val,
+        });
+        self.emit(Inst::Jump { target: merge_bb });
+
+        // Merge
+        self.switch_to_block(merge_bb);
+        Operand::VReg(result)
     }
 
     fn finish(mut self) -> Module {

@@ -290,6 +290,18 @@ fn get_expr_type(expr: &hir::Expression, infer: &infer::InferenceResult) -> infe
                 .unwrap_or(infer::Type::Unit),
             None => infer::Type::Unit,
         },
+        hir::Expression::If {
+            else_branch,
+            then_branch,
+            ..
+        } => match else_branch {
+            Some(_) => infer
+                .expression_types
+                .get(*then_branch)
+                .cloned()
+                .unwrap_or(infer::Type::Unit),
+            None => infer::Type::Unit,
+        },
     }
 }
 

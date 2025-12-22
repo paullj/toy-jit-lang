@@ -185,6 +185,7 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
             }
         }
         ast::Expression::Block(block) => lower_block(ctx, block),
+        ast::Expression::If(if_expr) => lower_if(ctx, if_expr),
     }
 }
 
@@ -322,6 +323,41 @@ fn lower_block(ctx: &mut Ctx, ast: ast::BlockExpression) -> Expression {
     ctx.symbols.pop_scope();
 
     Expression::Block { items, tail }
+}
+
+fn lower_if(ctx: &mut Ctx, ast: ast::IfExpression) -> Expression {
+    let cond_ast = ast.condition();
+    let cond_span = cond_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let cond_expr = lower_expression(ctx, cond_ast);
+    let condition = ctx.alloc(cond_expr, cond_span);
+
+    let then_ast = ast.then_branch();
+    let then_span = then_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let then_expr = then_ast
+        .map(|b| lower_block(ctx, b))
+        .unwrap_or(Expression::Missing);
+    let then_branch = ctx.alloc(then_expr, then_span);
+
+    let else_branch = ast.else_branch().map(|eb| {
+        let span = eb.syntax().text_range();
+        let expr = match eb {
+            ast::ElseBranch::Block(b) => lower_block(ctx, b),
+            ast::ElseBranch::ElseIf(if_e) => lower_if(ctx, if_e),
+        };
+        ctx.alloc(expr, span)
+    });
+
+    Expression::If {
+        condition,
+        then_branch,
+        else_branch,
+    }
 }
 
 fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {

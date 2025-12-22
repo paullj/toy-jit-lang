@@ -216,5 +216,20 @@ fn get_expr_type(expr: &Expression, inferred: &InferenceResult) -> Type {
                 .unwrap_or(Type::Unit),
             None => Type::Unit,
         },
+        Expression::If {
+            else_branch,
+            then_branch,
+            ..
+        } => {
+            // If with else returns then branch type, otherwise Unit
+            match else_branch {
+                Some(_) => inferred
+                    .expression_types
+                    .get(*then_branch)
+                    .cloned()
+                    .unwrap_or(Type::Unit),
+                None => Type::Unit,
+            }
+        }
     }
 }

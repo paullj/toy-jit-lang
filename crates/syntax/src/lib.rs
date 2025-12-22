@@ -59,6 +59,8 @@ pub enum SyntaxKind {
     OrKeyword,
     TrueKeyword,
     FalseKeyword,
+    IfKeyword,
+    ElseKeyword,
 
     // Tokens - Literals
     Identifier,
@@ -82,6 +84,7 @@ pub enum SyntaxKind {
     PrefixExpression,
     TypeAnnotation,
     BlockExpression,
+    IfExpression,
 }
 
 impl SyntaxKind {
@@ -149,6 +152,8 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::Or => SyntaxKind::OrKeyword,
             TokenKind::True => SyntaxKind::TrueKeyword,
             TokenKind::False => SyntaxKind::FalseKeyword,
+            TokenKind::If => SyntaxKind::IfKeyword,
+            TokenKind::Else => SyntaxKind::ElseKeyword,
 
             // Literals
             TokenKind::Identifier => SyntaxKind::Identifier,

@@ -60,7 +60,8 @@ pub(crate) const EXPR_FIRST: TokenSet = LITERAL_SET
     .union(TokenSet::single(TokenKind::Identifier))
     .union(PREFIX_SET)
     .union(TokenSet::single(TokenKind::LeftParenthesis))
-    .union(TokenSet::single(TokenKind::LeftBrace));
+    .union(TokenSet::single(TokenKind::LeftBrace))
+    .union(TokenSet::single(TokenKind::If));
 
 /// Recovery set for expression parsing (skip to newline or expr start)
 const EXPR_RECOVERY: TokenSet = EXPR_FIRST.union(TokenSet::single(TokenKind::NewLine));
@@ -133,6 +134,7 @@ fn lhs(p: &mut Parser) -> Option<CompletedMarker> {
         Some(TokenKind::Minus) | Some(TokenKind::Bang) => prefix_expression(p),
         Some(TokenKind::LeftParenthesis) => Some(parenthesis_expression(p)),
         Some(TokenKind::LeftBrace) => Some(block_expression(p)),
+        Some(TokenKind::If) => Some(if_expression(p)),
         _ => {
             p.recover("expected expression", EXPR_RECOVERY);
             None
@@ -226,6 +228,50 @@ fn block_expression(p: &mut Parser) -> CompletedMarker {
     }
 
     m.complete(p, SyntaxKind::BlockExpression)
+}
+
+fn if_expression(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::If));
+
+    let m = p.start();
+    p.consume(); // eat 'if'
+
+    // Parse condition
+    expression(p);
+
+    // Expect '{' for then branch
+    if !p.at(TokenKind::LeftBrace) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "'{'".to_string(),
+            found,
+        });
+    }
+    block_expression(p);
+
+    // Check for else (allows newline before else)
+    if p.eat(TokenKind::Else) {
+        if p.at(TokenKind::If) {
+            // else if
+            if_expression(p);
+        } else {
+            // else block
+            if !p.at(TokenKind::LeftBrace) {
+                let span = p.current_span();
+                let found = p.current().map(|k| k.to_string());
+                p.error(crate::ParseError::UnexpectedToken {
+                    at: span.into(),
+                    expected: "'{'".to_string(),
+                    found,
+                });
+            }
+            block_expression(p);
+        }
+    }
+
+    m.complete(p, SyntaxKind::IfExpression)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

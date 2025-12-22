@@ -43,6 +43,11 @@ pub enum Expression {
         items: Vec<BlockItem>,
         tail: Option<ExprIdx>,
     },
+    If {
+        condition: ExprIdx,
+        then_branch: ExprIdx,
+        else_branch: Option<ExprIdx>,
+    },
 }
 
 /// Item inside a block expression

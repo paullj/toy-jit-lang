@@ -32,3 +32,64 @@ Functions can also have no return value, in which case they return the `unit` ty
 fn do_nothing(): _ {
     # This function does nothing
 }
+
+Functions can be called by using their name followed by parentheses containing any required arguments:
+
+```toy
+result := add(5, 10)
+```
+
+Anonymous functions (lambdas) can be defined using the `fn` keyword without a name. They can be assigned to variables or passed as arguments to other functions:
+
+```toy
+increment := fn(x) { x + 1 }
+
+result := increment(5)
+```
+
+Higher-order functions can take other functions as parameters or return functions as results:
+
+```toy
+fn apply_twice(f, x) {
+    f(f(x))
+}
+
+result := apply_twice(increment, 5)  # result is 7
+```
+
+Functions can also have default parameter values:
+
+```toy
+fn greet(name: string = "World") {
+    return "Hello, " + name + "!"
+}
+
+greet()          # returns "Hello, World!"
+greet("Alice")   # returns "Hello, Alice!"
+```
+
+Functions can be recursive, allowing them to call themselves.
+
+```toy
+fn factorial(n: int): int {
+    if n <= 1 {
+        return 1
+    } else {
+        return n * factorial(n - 1)
+    }
+}
+result := factorial(5)  # result is 120
+```
+
+Functions in `toy` support closures, meaning they can capture variables from their surrounding scope:
+
+```toy
+fn make_adder(x) {
+    return fn(y) {
+        x + y
+    }
+}
+
+add_five := make_adder(5)
+result := add_five(10)  # result is 15
+```
