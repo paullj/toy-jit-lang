@@ -22,4 +22,25 @@ mod tests {
         assert_eq!(tokens.len(), 6); // x, ws, :, =, ws, 1
         assert!(tokens.iter().all(|r| r.is_ok()));
     }
+
+    #[test]
+    fn lex_doc_comment_vs_comment() {
+        let tokens = lex("## doc comment");
+        let first = tokens[0].as_ref().unwrap();
+        assert_eq!(
+            first.kind,
+            TokenKind::DocComment,
+            "## should be DocComment, got {:?}",
+            first.kind
+        );
+
+        let tokens = lex("# regular comment");
+        let first = tokens[0].as_ref().unwrap();
+        assert_eq!(
+            first.kind,
+            TokenKind::Comment,
+            "# should be Comment, got {:?}",
+            first.kind
+        );
+    }
 }

@@ -51,25 +51,19 @@ toy is a simple programming language that is made for fun.
   * incomplete expressions (e.g. "x + " at end of file, should say did you forget another operand?)
   * assigning an empty block to a variable (should say did you mean to have an expression in the block?)
 
-
 * more helpful warnings
+  * doc comments which are not attached to anything
+    * suggest attaching them to the next function/variable definition/doccomment
   * unused variables (naming convention: _varname to ignore warning)
   * unused functions (naming convention: _funcname to ignore warning)
   * shadowing variables
   * [not yet because all code is reachable] unreachable code
-
 
 * garbage collection
   * reference counting?
   * tracing gc?
 
 * tree sitter?
-
-* mir - almost 1:1 to machine code but optimise
-* register based vm
-* look at hot paths and jit
-
-* performance
 
 * good repl
   * lots of bugs right now
@@ -95,5 +89,13 @@ toy is a simple programming language that is made for fun.
 * generics
 
 * modules
+
+* performance
+  * benchmark suite
+  * compare jit vs vm vs interpreted
+  * optimise mir
+  * optimise jit codegen
+  * optimise vm
+  * look at hot paths and jit
 
 * use an interner?

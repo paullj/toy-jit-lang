@@ -128,10 +128,20 @@ impl LanguageServer for Backend {
         let ty_str = ty
             .map(|t| format!("{t}"))
             .unwrap_or_else(|| "unknown".to_string());
-        let content = format!("{}: {}", symbol.name, ty_str);
+        let content = if let Some(doc_comment) = &symbol.doc_comment {
+            format!(
+                "```toy\n{}: {}\n```\n---\n{}",
+                symbol.name, ty_str, doc_comment
+            )
+        } else {
+            format!("```toy\n{}: {}\n```", symbol.name, ty_str)
+        };
 
         Ok(Some(Hover {
-            contents: HoverContents::Scalar(MarkedString::String(content)),
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: content,
+            }),
             range: Some(to_lsp_range(doc.line_index.range(symbol.name_span))),
         }))
     }

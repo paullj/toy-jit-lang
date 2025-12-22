@@ -6,6 +6,57 @@ use ast::AstNode;
 use la_arena::{Arena, ArenaMap};
 use syntax::{SyntaxKind, TextRange};
 
+fn extract_doc_comment(node: &syntax::SyntaxNode) -> Option<String> {
+    use syntax::SyntaxElement;
+
+    let mut comments = Vec::new();
+    let mut consecutive_newlines = 0;
+    let mut found_doc = false;
+
+    // Walk through children (trivia comes first, before actual content)
+    for elem in node.children_with_tokens() {
+        match elem {
+            SyntaxElement::Token(token) => {
+                let kind = token.kind();
+                match kind {
+                    SyntaxKind::DocComment => {
+                        // Strip ## prefix and trim whitespace
+                        let text = token.text().trim_start_matches('#').trim();
+                        comments.push(text.to_string());
+                        consecutive_newlines = 0;
+                        found_doc = true;
+                    }
+                    SyntaxKind::NewLine => {
+                        consecutive_newlines += 1;
+                        // 2+ consecutive newlines = blank line, discard comments
+                        if found_doc && consecutive_newlines >= 2 {
+                            comments.clear();
+                            found_doc = false;
+                        }
+                    }
+                    SyntaxKind::Whitespace | SyntaxKind::Comment => {
+                        // Skip whitespace and regular comments
+                    }
+                    _ => {
+                        // Hit non-trivia token (e.g., Identifier), stop
+                        break;
+                    }
+                }
+            }
+            SyntaxElement::Node(_) => {
+                // Hit a child node, stop
+                break;
+            }
+        }
+    }
+
+    if comments.is_empty() {
+        None
+    } else {
+        Some(comments.join("\n"))
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct LowerResult {
     pub items: Vec<Item>,
@@ -36,9 +87,15 @@ impl Ctx {
         idx
     }
 
-    fn define_symbol(&mut self, name: String, def_span: TextRange, name_span: TextRange) {
+    fn define_symbol(
+        &mut self,
+        name: String,
+        def_span: TextRange,
+        name_span: TextRange,
+        doc_comment: Option<String>,
+    ) {
         self.symbols
-            .define(name, SymbolKind::Variable, def_span, name_span);
+            .define(name, SymbolKind::Variable, def_span, name_span, doc_comment);
     }
 
     fn add_reference(&mut self, name: &str, span: TextRange) {
@@ -75,7 +132,8 @@ fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
             let name = name_token.text().to_string();
             let def_span = def.syntax().text_range();
             let name_span = name_token.text_range();
-            ctx.define_symbol(name.clone(), def_span, name_span);
+            let doc_comment = extract_doc_comment(def.syntax());
+            ctx.define_symbol(name.clone(), def_span, name_span, doc_comment);
             let value = lower_expression(ctx, def.value());
             Some(Item::Definition(Definition::Variable { name, value }))
         }
@@ -238,7 +296,8 @@ fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
             let name = name_token.text().to_string();
             let def_span = def.syntax().text_range();
             let name_span = name_token.text_range();
-            ctx.define_symbol(name.clone(), def_span, name_span);
+            let doc_comment = extract_doc_comment(def.syntax());
+            ctx.define_symbol(name.clone(), def_span, name_span, doc_comment);
             let value = lower_expression(ctx, def.value());
             let value_span = def
                 .value()
@@ -682,5 +741,47 @@ mod tests {
             panic!("expected expression item");
         };
         assert!(matches!(expr, Expression::Literal(Literal::Integer(42))));
+    }
+
+    // === Doc comments ===
+
+    #[test]
+    fn lower_doc_comment() {
+        let result = lower_src("## This is a doc comment\nx := 42");
+        let symbol = result.symbols.get("x").unwrap();
+        assert_eq!(symbol.doc_comment.as_deref(), Some("This is a doc comment"));
+    }
+
+    #[test]
+    fn lower_multiline_doc_comment() {
+        let result = lower_src("## Line 1\n## Line 2\n## Line 3\nx := 42");
+        let symbol = result.symbols.get("x").unwrap();
+        assert_eq!(
+            symbol.doc_comment.as_deref(),
+            Some("Line 1\nLine 2\nLine 3")
+        );
+    }
+
+    #[test]
+    fn lower_no_doc_comment() {
+        let result = lower_src("x := 42");
+        let symbol = result.symbols.get("x").unwrap();
+        assert_eq!(symbol.doc_comment, None);
+    }
+
+    #[test]
+    fn lower_doc_comment_with_blank_line_breaks() {
+        let result = lower_src("## Comment\n\n\nx := 42");
+        let symbol = result.symbols.get("x").unwrap();
+        // More than one blank line (2+) should break the doc comment
+        assert_eq!(symbol.doc_comment, None);
+    }
+
+    #[test]
+    fn lower_regular_comment_not_doc() {
+        // Regular # comments should not become doc comments
+        let result = lower_src("# This is a regular comment\nx := 42");
+        let symbol = result.symbols.get("x").unwrap();
+        assert_eq!(symbol.doc_comment, None);
     }
 }

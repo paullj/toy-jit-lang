@@ -12,6 +12,7 @@ pub enum SyntaxKind {
     // Tokens - Trivia
     Whitespace,
     Comment,
+    DocComment,
     NewLine,
 
     // Tokens - Brackets
@@ -100,6 +101,7 @@ impl From<TokenKind> for SyntaxKind {
         match value {
             // Trivia
             TokenKind::Whitespace => SyntaxKind::Whitespace,
+            TokenKind::DocComment => SyntaxKind::DocComment,
             TokenKind::Comment => SyntaxKind::Comment,
             TokenKind::NewLine => SyntaxKind::NewLine,
 

@@ -28,6 +28,8 @@ struct Token {
     category: String,
     #[serde(default)]
     textmate_scope: Option<String>,
+    #[serde(default)]
+    priority: Option<u32>,
 }
 
 fn main() {
@@ -79,10 +81,16 @@ fn generate_token_kind(config: &TokensConfig) -> String {
                 || regex.contains(".+")
                 || regex.ends_with('*')
                 || regex.ends_with('+');
+            let priority = token.priority.unwrap_or(2);
             if is_greedy {
                 code.push_str(&format!(
-                    "    #[regex(r#\"{}\"#, priority = 2, allow_greedy = true)]\n",
-                    regex
+                    "    #[regex(r#\"{}\"#, priority = {}, allow_greedy = true)]\n",
+                    regex, priority
+                ));
+            } else if token.priority.is_some() {
+                code.push_str(&format!(
+                    "    #[regex(r#\"{}\"#, priority = {})]\n",
+                    regex, priority
                 ));
             } else {
                 code.push_str(&format!("    #[regex(r#\"{}\"#)]\n", regex));

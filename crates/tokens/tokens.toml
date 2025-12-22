@@ -19,6 +19,13 @@ category = "trivia"
 textmate_scope = "comment.line.number-sign.toy"
 
 [[tokens]]
+name = "DocComment"
+regex = "##[^\\r\\n]*"
+category = "trivia"
+priority = 3
+textmate_scope = "comment.line.documentation.toy"
+
+[[tokens]]
 name = "NewLine"
 regex = "[\\r\\n]"
 category = "trivia"

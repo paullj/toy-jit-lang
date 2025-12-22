@@ -53,7 +53,7 @@ pub fn token_style(kind: TokenKind) -> Style {
         | TokenKind::Colon => Style::default().fg(Color::DarkGray),
 
         // Comments
-        TokenKind::Comment => Style::default().fg(Color::DarkGray),
+        TokenKind::Comment | TokenKind::DocComment => Style::default().fg(Color::DarkGray),
 
         // Identifiers
         TokenKind::Identifier => Style::default().fg(Color::White),

@@ -10,12 +10,24 @@
       "name": "comment.line.number-sign.toy"
     },
     {
+      "match": "##[^\\r\\n]*",
+      "name": "comment.line.documentation.toy"
+    },
+    {
       "match": "\\(",
       "name": "punctuation.paren.open.toy"
     },
     {
       "match": "\\)",
       "name": "punctuation.paren.close.toy"
+    },
+    {
+      "match": "\\{",
+      "name": "punctuation.brace.open.toy"
+    },
+    {
+      "match": "\\}",
+      "name": "punctuation.brace.close.toy"
     },
     {
       "match": ",",

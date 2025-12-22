@@ -21,7 +21,8 @@
         ],
         "aliases": [
           "toy"
-        ]
+        ],
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
