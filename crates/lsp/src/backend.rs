@@ -30,7 +30,7 @@ impl Backend {
 
             doc.diagnostics()
                 .iter()
-                .map(to_lsp_diagnostic)
+                .map(|d| to_lsp_diagnostic(d, &doc.line_index))
                 .collect::<Vec<_>>()
         };
 

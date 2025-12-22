@@ -11,7 +11,7 @@ use crate::suggest::find_similar;
 use crate::types::{Type, TypeVar};
 use crate::unify::{UnifyError, unify};
 use crate::{InferState, InferWithState, InferenceResult};
-use hir::{BlockItem, Definition, ExprIdx, Expression, InfixOp, Item, Literal, TextRange};
+use hir::{BlockItem, Definition, ExprIdx, Expression, Item, Literal, TextRange};
 
 fn to_span(range: TextRange) -> SourceSpan {
     let start: usize = range.start().into();
@@ -76,17 +76,6 @@ impl<'a> InferCtx<'a> {
     fn infer_item(&mut self, item: &Item, span: TextRange) {
         match item {
             Item::Definition(Definition::Variable { name, value }) => {
-                // Check for empty block assignment
-                if let Expression::Block { items, tail } = value
-                    && items.is_empty()
-                    && tail.is_none()
-                {
-                    self.diagnostics
-                        .push(InferDiagnostic::EmptyBlockAssignment {
-                            span: to_span(span),
-                        });
-                }
-
                 let ty = self.infer_expr(value, span);
                 // Apply current substitution before generalizing
                 let ty = self.subst.apply(&ty);
@@ -149,15 +138,6 @@ impl<'a> InferCtx<'a> {
         let sig = ops::infix_signature(op);
         let (lhs_ty, lhs_span) = self.infer_expr_idx(lhs);
         let (rhs_ty, rhs_span) = self.infer_expr_idx(rhs);
-
-        // Check for division by zero
-        if matches!(op, InfixOp::Div | InfixOp::DivFloat | InfixOp::Mod)
-            && self.is_zero_literal(rhs)
-        {
-            self.diagnostics.push(InferDiagnostic::DivisionByZero {
-                span: to_span(rhs_span),
-            });
-        }
 
         // Check for wrong operator (int op on floats or float op on ints)
         let lhs_resolved = self.subst.apply(&lhs_ty);
@@ -294,14 +274,6 @@ impl<'a> InferCtx<'a> {
                 });
                 Type::Error
             }
-        }
-    }
-
-    fn is_zero_literal(&self, idx: ExprIdx) -> bool {
-        match &self.hir.expressions[idx] {
-            Expression::Literal(Literal::Integer(0)) => true,
-            Expression::Literal(Literal::Float(f)) if *f == 0.0 => true,
-            _ => false,
         }
     }
 

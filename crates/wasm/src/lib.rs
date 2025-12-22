@@ -46,19 +46,23 @@ pub fn analyze(source: &str) -> JsValue {
     let doc = analyse::Document::new(source.to_string());
     let diagnostics: Vec<JsDiagnostic> = doc
         .diagnostics()
-        .into_iter()
-        .map(|d| JsDiagnostic {
-            start_line: d.range.start.line,
-            start_col: d.range.start.character,
-            end_line: d.range.end.line,
-            end_col: d.range.end.character,
-            severity: match d.severity {
-                analyse::DiagnosticSeverity::Error => "error",
-                analyse::DiagnosticSeverity::Warning => "warning",
-                analyse::DiagnosticSeverity::Info => "info",
-                analyse::DiagnosticSeverity::Hint => "hint",
-            },
-            message: d.message,
+        .iter()
+        .map(|d| {
+            let (range, severity, _code, message, _help) =
+                analyse::to_lsp_fields(d, &doc.line_index);
+            JsDiagnostic {
+                start_line: range.start.line,
+                start_col: range.start.character,
+                end_line: range.end.line,
+                end_col: range.end.character,
+                severity: match severity {
+                    analyse::DiagnosticSeverity::Error => "error",
+                    analyse::DiagnosticSeverity::Warning => "warning",
+                    analyse::DiagnosticSeverity::Info => "info",
+                    analyse::DiagnosticSeverity::Hint => "hint",
+                },
+                message,
+            }
         })
         .collect();
 

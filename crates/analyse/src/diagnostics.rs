@@ -1,6 +1,8 @@
+use hir::HirDiagnostic;
 use infer::InferDiagnostic;
-use miette::SourceSpan;
+use miette::{Diagnostic, SourceSpan};
 use parse::ParseError;
+use std::fmt;
 
 use crate::Range;
 use crate::line_index::LineIndex;
@@ -13,13 +15,121 @@ pub enum DiagnosticSeverity {
     Hint,
 }
 
+/// Unified diagnostic type wrapping all diagnostic sources.
 #[derive(Debug, Clone)]
-pub struct Diagnostic {
-    pub range: Range,
-    pub severity: DiagnosticSeverity,
-    pub code: String,
-    pub message: String,
-    pub help: Option<String>,
+pub enum AnalyseDiagnostic {
+    Parse(ParseError),
+    Hir(HirDiagnostic),
+    Infer(InferDiagnostic),
+}
+
+impl fmt::Display for AnalyseDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse(e) => write!(f, "{}", e),
+            Self::Hir(e) => write!(f, "{}", e),
+            Self::Infer(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for AnalyseDiagnostic {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Parse(e) => e.source(),
+            Self::Hir(e) => e.source(),
+            Self::Infer(e) => e.source(),
+        }
+    }
+}
+
+impl Diagnostic for AnalyseDiagnostic {
+    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        match self {
+            Self::Parse(e) => e.code(),
+            Self::Hir(e) => e.code(),
+            Self::Infer(e) => e.code(),
+        }
+    }
+
+    fn severity(&self) -> Option<miette::Severity> {
+        match self {
+            Self::Parse(e) => e.severity(),
+            Self::Hir(e) => e.severity(),
+            Self::Infer(e) => e.severity(),
+        }
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        match self {
+            Self::Parse(e) => e.help(),
+            Self::Hir(e) => e.help(),
+            Self::Infer(e) => e.help(),
+        }
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
+        match self {
+            Self::Parse(e) => e.labels(),
+            Self::Hir(e) => e.labels(),
+            Self::Infer(e) => e.labels(),
+        }
+    }
+
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        match self {
+            Self::Parse(e) => e.related(),
+            Self::Hir(e) => e.related(),
+            Self::Infer(e) => e.related(),
+        }
+    }
+
+    fn url<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        match self {
+            Self::Parse(e) => e.url(),
+            Self::Hir(e) => e.url(),
+            Self::Infer(e) => e.url(),
+        }
+    }
+
+    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
+        match self {
+            Self::Parse(e) => e.source_code(),
+            Self::Hir(e) => e.source_code(),
+            Self::Infer(e) => e.source_code(),
+        }
+    }
+
+    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
+        match self {
+            Self::Parse(e) => e.diagnostic_source(),
+            Self::Hir(e) => e.diagnostic_source(),
+            Self::Infer(e) => e.diagnostic_source(),
+        }
+    }
+}
+
+impl From<ParseError> for AnalyseDiagnostic {
+    fn from(e: ParseError) -> Self {
+        Self::Parse(e)
+    }
+}
+
+impl From<HirDiagnostic> for AnalyseDiagnostic {
+    fn from(e: HirDiagnostic) -> Self {
+        Self::Hir(e)
+    }
+}
+
+impl From<InferDiagnostic> for AnalyseDiagnostic {
+    fn from(e: InferDiagnostic) -> Self {
+        Self::Infer(e)
+    }
+}
+
+// Helper to get the primary span from a diagnostic
+fn get_primary_span(diag: &AnalyseDiagnostic) -> Option<SourceSpan> {
+    diag.labels()?.next().map(|l| *l.inner())
 }
 
 fn source_span_to_range(span: SourceSpan, line_index: &LineIndex) -> Range {
@@ -28,139 +138,31 @@ fn source_span_to_range(span: SourceSpan, line_index: &LineIndex) -> Range {
     Range::new(line_index.position(start), line_index.position(end))
 }
 
-pub fn convert_parse_error(error: &ParseError, line_index: &LineIndex) -> Diagnostic {
-    match error {
-        ParseError::UnexpectedToken {
-            at,
-            expected,
-            found,
-        } => {
-            let msg = match found {
-                Some(f) => format!("unexpected `{f}`, expected {expected}"),
-                None => format!("unexpected token, expected {expected}"),
-            };
-            Diagnostic {
-                range: source_span_to_range(*at, line_index),
-                severity: DiagnosticSeverity::Error,
-                code: "parse:unexpected_token".into(),
-                message: msg,
-                help: None,
-            }
-        }
-        ParseError::ExpectedVariableItem { at, expected } => {
-            let msg = match expected {
-                Some(e) => format!("expected variable definition, assignment, or expression. {e}"),
-                None => "expected variable definition, assignment, or expression".into(),
-            };
-            Diagnostic {
-                range: source_span_to_range(*at, line_index),
-                severity: DiagnosticSeverity::Error,
-                code: "parse:expected_variable_item".into(),
-                message: msg,
-                help: None,
-            }
-        }
-        ParseError::IncompleteExpression { at, operator } => Diagnostic {
-            range: source_span_to_range(*at, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "parse:incomplete_expression".into(),
-            message: format!("incomplete expression after `{operator}`"),
-            help: Some("did you forget another operand?".into()),
-        },
-        ParseError::SuggestDefinition { at, name, hint } => Diagnostic {
-            range: source_span_to_range(*at, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "parse:suggest_definition".into(),
-            message: format!("cannot assign to undefined variable `{name}`"),
-            help: Some(hint.clone()),
-        },
-        ParseError::UnnecessarySemicolon { at } => Diagnostic {
-            range: source_span_to_range(*at, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "parse:unnecessary_semicolon".into(),
-            message: "unexpected semicolon".into(),
-            help: Some("semicolons are not needed - statements are separated by newlines".into()),
-        },
+fn miette_to_severity(sev: Option<miette::Severity>) -> DiagnosticSeverity {
+    match sev {
+        Some(miette::Severity::Error) | None => DiagnosticSeverity::Error,
+        Some(miette::Severity::Warning) => DiagnosticSeverity::Warning,
+        Some(miette::Severity::Advice) => DiagnosticSeverity::Hint,
     }
 }
 
-pub fn convert_infer_diagnostic(error: &InferDiagnostic, line_index: &LineIndex) -> Diagnostic {
-    match error {
-        InferDiagnostic::Mismatch {
-            expected,
-            found,
-            span,
-        } => Diagnostic {
-            range: source_span_to_range(*span, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "infer:type_mismatch".into(),
-            message: format!("type mismatch: expected `{expected}`, found `{found}`"),
-            help: None,
-        },
-        InferDiagnostic::Undefined {
-            name,
-            span,
-            suggestion,
-        } => Diagnostic {
-            range: source_span_to_range(*span, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "infer:undefined".into(),
-            message: format!("undefined variable `{name}`"),
-            help: suggestion.clone(),
-        },
-        InferDiagnostic::InfiniteType { var, ty, span } => Diagnostic {
-            range: source_span_to_range(*span, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "infer:infinite_type".into(),
-            message: format!("infinite type: `{var}` occurs in `{ty}`"),
-            help: None,
-        },
-        InferDiagnostic::ArityMismatch {
-            expected,
-            found,
-            span,
-        } => Diagnostic {
-            range: source_span_to_range(*span, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "infer:arity_mismatch".into(),
-            message: format!("arity mismatch: expected {expected} argument(s), found {found}"),
-            help: None,
-        },
-        InferDiagnostic::WrongOperator {
-            op,
-            expected_type,
-            actual_type,
-            suggest_op,
-            span,
-        } => Diagnostic {
-            range: source_span_to_range(*span, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "infer:wrong_operator".into(),
-            message: format!(
-                "operator `{op}` is for `{expected_type}`, but operands are `{actual_type}`"
-            ),
-            help: Some(format!("use `{suggest_op}` for `{actual_type}` operations")),
-        },
-        InferDiagnostic::DivisionByZero { span } => Diagnostic {
-            range: source_span_to_range(*span, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "infer:division_by_zero".into(),
-            message: "division by zero".into(),
-            help: None,
-        },
-        InferDiagnostic::OverflowLiteral { value, ty, span } => Diagnostic {
-            range: source_span_to_range(*span, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "infer:overflow_literal".into(),
-            message: format!("literal `{value}` overflows type `{ty}`"),
-            help: None,
-        },
-        InferDiagnostic::EmptyBlockAssignment { span } => Diagnostic {
-            range: source_span_to_range(*span, line_index),
-            severity: DiagnosticSeverity::Error,
-            code: "infer:empty_block_assignment".into(),
-            message: "assigning empty block to variable".into(),
-            help: Some("empty blocks have type `()` (unit). Did you mean to have an expression in the block?".into()),
-        },
-    }
+/// Convert an AnalyseDiagnostic to LSP-compatible fields
+pub fn to_lsp_fields(
+    diag: &AnalyseDiagnostic,
+    line_index: &LineIndex,
+) -> (
+    Range,
+    DiagnosticSeverity,
+    Option<String>,
+    String,
+    Option<String>,
+) {
+    let range = get_primary_span(diag)
+        .map(|s| source_span_to_range(s, line_index))
+        .unwrap_or_default();
+    let severity = miette_to_severity(diag.severity());
+    let code = diag.code().map(|c| c.to_string());
+    let message = diag.to_string();
+    let help = diag.help().map(|h| h.to_string());
+    (range, severity, code, message, help)
 }

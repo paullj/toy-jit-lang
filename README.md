@@ -32,13 +32,6 @@ toy is a simple programming language that is made for fun.
   * defining a variable should return unit type, not the value assigned
     * not sure if this is a bug yet since we don't have functions yet so ignore
   * hover for variables doesn't show type in blocks
-  * analyse should output all diagnostics
-    * all frontend crates should use miette and thiserror internally to display rich diagnostics
-      * they should all have labelled spans
-    * analyse should use miette diagnostics internally
-    * repl should use this and convert to whatever format it wants internally
-    * lsp should use this and convert to lsp diagnostics format
-    * cli should use this and print them with miette
   * infer has some stuff in there which is not related to type inference
 
 * more helpful warnings

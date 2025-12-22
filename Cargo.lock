@@ -830,8 +830,10 @@ version = "0.1.0"
 dependencies = [
  "ast",
  "la-arena",
+ "miette",
  "parse",
  "syntax",
+ "thiserror",
 ]
 
 [[package]]

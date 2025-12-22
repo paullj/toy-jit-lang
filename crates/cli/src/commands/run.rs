@@ -1,30 +1,18 @@
 use std::path::PathBuf;
 
+use analyse::{AnalyseDiagnostic, Document};
 use clap::{Args, ValueEnum};
 use miette::{Diagnostic, Result};
+use runtime::{ExecutionMode, Runtime};
 use thiserror::Error;
 
-use ast::AstNode;
-use infer::InferDiagnostic;
-use parse::ParseError;
-use runtime::{ExecutionMode, Runtime};
-
 #[derive(Diagnostic, Debug, Error)]
-#[error("parse errors")]
-struct ParseErrors {
+#[error("compilation errors")]
+struct CompileErrors {
     #[source_code]
     src: String,
     #[related]
-    errors: Vec<ParseError>,
-}
-
-#[derive(Diagnostic, Debug, Error)]
-#[error("type errors")]
-struct TypeErrors {
-    #[source_code]
-    src: String,
-    #[related]
-    errors: Vec<InferDiagnostic>,
+    errors: Vec<AnalyseDiagnostic>,
 }
 
 /// Execution mode for the runtime
@@ -67,32 +55,30 @@ impl RunCmd {
 }
 
 pub fn process(src: &str, mode: ExecutionMode) -> Result<()> {
-    let (tree, errors) = parse::parse(src);
-    if !errors.is_empty() {
-        return Err(ParseErrors {
+    let doc = Document::new(src.to_string());
+
+    if doc.has_errors() {
+        return Err(CompileErrors {
             src: src.to_string(),
-            errors,
+            errors: doc.diagnostics(),
         }
         .into());
     }
 
-    let root = ast::Root::cast(tree).ok_or_else(|| miette::miette!("invalid syntax tree"))?;
-    let lower = hir::lower(root);
-    let inferred = infer::infer(&lower);
+    let lower = doc
+        .lower_result
+        .as_ref()
+        .ok_or_else(|| miette::miette!("failed to lower"))?;
+    let inferred = doc
+        .infer_result
+        .as_ref()
+        .ok_or_else(|| miette::miette!("failed to infer"))?;
 
-    if inferred.has_errors() {
-        return Err(TypeErrors {
-            src: src.to_string(),
-            errors: inferred.diagnostics,
-        }
-        .into());
-    }
-
-    let mir_module = mir::lower(&lower, &inferred);
+    let mir_module = mir::lower(lower, inferred);
 
     let mut runtime = Runtime::new(mode);
     let result = runtime
-        .execute(&mir_module, &lower, &inferred)
+        .execute(&mir_module, lower, inferred)
         .map_err(|e| miette::miette!("{e}"))?;
 
     println!("{}", result);

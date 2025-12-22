@@ -3,7 +3,7 @@
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-#[derive(Error, Diagnostic, Debug, PartialEq)]
+#[derive(Error, Diagnostic, Debug, PartialEq, Clone)]
 pub enum ParseError {
     #[error("unexpected token, expected {expected}")]
     #[diagnostic(code("parse:unexpected_token"))]

@@ -1,9 +1,10 @@
 use crate::{
-    BlockItem, Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp, SymbolKind,
-    SymbolTable,
+    BlockItem, Definition, ExprIdx, Expression, HirDiagnostic, InfixOp, Item, Literal, PrefixOp,
+    SymbolKind, SymbolTable,
 };
 use ast::AstNode;
 use la_arena::{Arena, ArenaMap};
+use miette::SourceSpan;
 use syntax::{SyntaxKind, TextRange};
 
 fn extract_doc_comment(node: &syntax::SyntaxNode) -> Option<String> {
@@ -57,6 +58,12 @@ fn extract_doc_comment(node: &syntax::SyntaxNode) -> Option<String> {
     }
 }
 
+fn to_span(range: TextRange) -> SourceSpan {
+    let start: usize = range.start().into();
+    let len: usize = range.len().into();
+    (start, len).into()
+}
+
 #[derive(Debug, Default)]
 pub struct LowerResult {
     pub items: Vec<Item>,
@@ -64,12 +71,14 @@ pub struct LowerResult {
     pub expr_spans: ArenaMap<ExprIdx, TextRange>,
     pub item_spans: Vec<TextRange>,
     pub symbols: SymbolTable,
+    pub diagnostics: Vec<HirDiagnostic>,
 }
 
 struct Ctx {
     expressions: Arena<Expression>,
     expr_spans: ArenaMap<ExprIdx, TextRange>,
     symbols: SymbolTable,
+    diagnostics: Vec<HirDiagnostic>,
 }
 
 impl Ctx {
@@ -78,6 +87,7 @@ impl Ctx {
             expressions: Arena::new(),
             expr_spans: ArenaMap::new(),
             symbols: SymbolTable::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -122,6 +132,7 @@ pub fn lower(root: ast::Root) -> LowerResult {
         expr_spans: ctx.expr_spans,
         item_spans,
         symbols: ctx.symbols,
+        diagnostics: ctx.diagnostics,
     }
 }
 
@@ -223,6 +234,13 @@ fn lower_infix(ctx: &mut Ctx, ast: ast::InfixExpression) -> Expression {
         .map(|e| e.syntax().text_range())
         .unwrap_or_default();
 
+    // Check for division by zero with literal 0
+    if matches!(op, InfixOp::Div | InfixOp::DivFloat | InfixOp::Mod) && is_zero_literal(&rhs_ast) {
+        ctx.diagnostics.push(HirDiagnostic::DivisionByZero {
+            span: to_span(rhs_span),
+        });
+    }
+
     let lhs = lower_expression(ctx, lhs_ast);
     let rhs = lower_expression(ctx, rhs_ast);
 
@@ -231,6 +249,16 @@ fn lower_infix(ctx: &mut Ctx, ast: ast::InfixExpression) -> Expression {
         lhs: ctx.alloc(lhs, lhs_span),
         rhs: ctx.alloc(rhs, rhs_span),
     }
+}
+
+fn is_zero_literal(ast: &Option<ast::Expression>) -> bool {
+    let Some(ast::Expression::Literal(lit)) = ast else {
+        return false;
+    };
+    matches!(
+        lit.value(),
+        Some(ast::LiteralValue::Integer(0)) | Some(ast::LiteralValue::Float(0.0))
+    )
 }
 
 fn lower_prefix(ctx: &mut Ctx, ast: ast::PrefixExpression) -> Expression {
@@ -283,6 +311,13 @@ fn lower_block(ctx: &mut Ctx, ast: ast::BlockExpression) -> Expression {
         BlockItem::Expression(idx) => Some(*idx),
         _ => None,
     });
+
+    // Warn on empty blocks
+    if items.is_empty() && tail.is_none() {
+        ctx.diagnostics.push(HirDiagnostic::EmptyBlock {
+            span: to_span(ast.syntax().text_range()),
+        });
+    }
 
     ctx.symbols.pop_scope();
 

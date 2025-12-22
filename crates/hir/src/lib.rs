@@ -1,6 +1,8 @@
+mod diagnostic;
 mod lower;
 mod symbols;
 
+pub use diagnostic::HirDiagnostic;
 pub use lower::{LowerResult, lower};
 pub use symbols::{Symbol, SymbolKind, SymbolTable};
 pub use syntax::TextRange;

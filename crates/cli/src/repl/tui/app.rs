@@ -320,15 +320,18 @@ fn format_parse_errors(source: &str, errors: &[parse::ParseError]) -> String {
     let mut output = String::new();
 
     for error in errors {
-        let diag = analyse::convert_parse_error(error, &line_index);
-        let start = diag.range.start.character as usize;
-        let end = diag.range.end.character as usize;
+        let (range, _severity, _code, message, _help) = analyse::to_lsp_fields(
+            &analyse::AnalyseDiagnostic::Parse(error.clone()),
+            &line_index,
+        );
+        let start = range.start.character as usize;
+        let end = range.end.character as usize;
         let len = end.saturating_sub(start).max(1);
 
         let report: Report = miette::miette!(
-            labels = vec![miette::LabeledSpan::at(start..start + len, &diag.message)],
+            labels = vec![miette::LabeledSpan::at(start..start + len, &message)],
             "{}",
-            diag.message
+            message
         )
         .with_source_code(NamedSource::new("repl", source.to_string()));
 
@@ -346,18 +349,18 @@ fn format_infer_errors(source: &str, diagnostics: &[infer::InferDiagnostic]) -> 
     let mut output = String::new();
 
     for diag in diagnostics {
-        let converted = analyse::convert_infer_diagnostic(diag, &line_index);
-        let start = converted.range.start.character as usize;
-        let end = converted.range.end.character as usize;
+        let (range, _severity, _code, message, _help) = analyse::to_lsp_fields(
+            &analyse::AnalyseDiagnostic::Infer(diag.clone()),
+            &line_index,
+        );
+        let start = range.start.character as usize;
+        let end = range.end.character as usize;
         let len = end.saturating_sub(start).max(1);
 
         let report: Report = miette::miette!(
-            labels = vec![miette::LabeledSpan::at(
-                start..start + len,
-                &converted.message
-            )],
+            labels = vec![miette::LabeledSpan::at(start..start + len, &message)],
             "{}",
-            converted.message
+            message
         )
         .with_source_code(NamedSource::new("repl", source.to_string()));
 
@@ -411,9 +414,12 @@ pub fn run() -> io::Result<()> {
             if !diagnostics.is_empty() {
                 // Print underlines - start with prompt offset
                 let mut diag_chars: Vec<char> = " ".repeat(prompt.len()).chars().collect();
+                let line_index = &analysis.line_index;
                 for diag in &diagnostics {
-                    let start = diag.range.start.character as usize;
-                    let end = diag.range.end.character as usize;
+                    let (range, _severity, _code, _message, _help) =
+                        analyse::to_lsp_fields(diag, line_index);
+                    let start = range.start.character as usize;
+                    let end = range.end.character as usize;
                     // Extend if needed
                     while diag_chars.len() < prompt.len() + end {
                         diag_chars.push(' ');
@@ -427,7 +433,7 @@ pub fn run() -> io::Result<()> {
                 print!("\x1b[31m{}\x1b[0m", diag_line);
 
                 if let Some(diag) = diagnostics.first() {
-                    print!(" {}", diag.message);
+                    print!(" {}", diag);
                 }
             }
         }

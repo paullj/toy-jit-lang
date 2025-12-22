@@ -7,7 +7,9 @@ publish = false
 [dependencies]
 ast = { path = "../ast" }
 la-arena = "0.3.1"
+miette = { version = "7", default-features = false, features = ["derive"] }
 syntax = { path = "../syntax" }
+thiserror = "2"
 
 [dev-dependencies]
 parse = { path = "../parse" }

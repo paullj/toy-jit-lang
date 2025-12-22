@@ -54,29 +54,12 @@ pub enum InferDiagnostic {
         suggest_op: String,
     },
 
-    #[error("division by zero")]
-    #[diagnostic(code(infer::division_by_zero))]
-    DivisionByZero {
-        #[label("divisor is zero")]
-        span: SourceSpan,
-    },
-
     #[error("literal `{value}` overflows type `{ty}`")]
     #[diagnostic(code(infer::overflow_literal))]
     OverflowLiteral {
         value: String,
         ty: String,
         #[label("value too large for type")]
-        span: SourceSpan,
-    },
-
-    #[error("assigning empty block to variable")]
-    #[diagnostic(code(infer::empty_block_assignment))]
-    #[diagnostic(help(
-        "empty blocks have type `()` (unit). Did you mean to have an expression in the block?"
-    ))]
-    EmptyBlockAssignment {
-        #[label("empty block")]
         span: SourceSpan,
     },
 }

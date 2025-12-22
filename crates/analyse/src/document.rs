@@ -3,7 +3,7 @@ use hir::{LowerResult, Symbol};
 use infer::{InferenceResult, Type};
 use parse::ParseError;
 
-use crate::diagnostics::{Diagnostic, convert_infer_diagnostic, convert_parse_error};
+use crate::diagnostics::AnalyseDiagnostic;
 use crate::line_index::{LineIndex, Position};
 
 /// Cached analysis state for source text.
@@ -59,23 +59,47 @@ impl Document {
         self.type_of_symbol(symbol)
     }
 
-    /// Get all diagnostics (parse + type errors).
-    pub fn diagnostics(&self) -> Vec<Diagnostic> {
-        let mut diagnostics: Vec<_> = self
-            .parse_errors
-            .iter()
-            .map(|e| convert_parse_error(e, &self.line_index))
-            .collect();
+    /// Check if there are any errors.
+    pub fn has_errors(&self) -> bool {
+        !self.parse_errors.is_empty()
+            || self
+                .lower_result
+                .as_ref()
+                .is_some_and(|l| !l.diagnostics.is_empty())
+            || self.infer_result.as_ref().is_some_and(|i| i.has_errors())
+    }
 
-        if let Some(ref infer) = self.infer_result {
-            diagnostics.extend(
-                infer
+    /// Get all diagnostics (parse + hir + infer).
+    pub fn diagnostics(&self) -> Vec<AnalyseDiagnostic> {
+        let mut diags = Vec::new();
+
+        diags.extend(
+            self.parse_errors
+                .iter()
+                .cloned()
+                .map(AnalyseDiagnostic::Parse),
+        );
+
+        if let Some(ref lower) = self.lower_result {
+            diags.extend(
+                lower
                     .diagnostics
                     .iter()
-                    .map(|e| convert_infer_diagnostic(e, &self.line_index)),
+                    .cloned()
+                    .map(AnalyseDiagnostic::Hir),
             );
         }
 
-        diagnostics
+        if let Some(ref infer) = self.infer_result {
+            diags.extend(
+                infer
+                    .diagnostics
+                    .iter()
+                    .cloned()
+                    .map(AnalyseDiagnostic::Infer),
+            );
+        }
+
+        diags
     }
 }

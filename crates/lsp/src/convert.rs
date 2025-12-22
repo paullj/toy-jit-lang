@@ -1,4 +1,4 @@
-use analyse::{Diagnostic, DiagnosticSeverity, Position, Range};
+use analyse::{AnalyseDiagnostic, DiagnosticSeverity, LineIndex, Position, Range, to_lsp_fields};
 use tower_lsp::lsp_types;
 
 pub fn from_lsp_position(pos: lsp_types::Position) -> Position {
@@ -22,12 +22,16 @@ pub fn to_lsp_severity(severity: DiagnosticSeverity) -> lsp_types::DiagnosticSev
     }
 }
 
-pub fn to_lsp_diagnostic(diag: &Diagnostic) -> lsp_types::Diagnostic {
+pub fn to_lsp_diagnostic(
+    diag: &AnalyseDiagnostic,
+    line_index: &LineIndex,
+) -> lsp_types::Diagnostic {
+    let (range, severity, code, message, _help) = to_lsp_fields(diag, line_index);
     lsp_types::Diagnostic {
-        range: to_lsp_range(diag.range),
-        severity: Some(to_lsp_severity(diag.severity)),
-        code: Some(lsp_types::NumberOrString::String(diag.code.clone())),
-        message: diag.message.clone(),
+        range: to_lsp_range(range),
+        severity: Some(to_lsp_severity(severity)),
+        code: code.map(lsp_types::NumberOrString::String),
+        message,
         ..Default::default()
     }
 }
