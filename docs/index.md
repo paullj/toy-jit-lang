@@ -1,4 +1,5 @@
-# Documentation
+> [!IMPORTANT]
+> This project is intended to be used as a learning tool for me to understand how programming languages work from writing source code to executing it. It is not intended for production use.
 
 A simple statically-typed programming and scripting language.
 

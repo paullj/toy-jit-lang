@@ -1,6 +1,4 @@
-# Variables an
-
-## Variables
+# Variables
 
 A variable is a container that our program uses to store a value in memory. They are declared with a name, a type, and a value. The `=` operator is used for assignment of variables and constants. The `:` operator is used for specifying the type of a variable when its declared.
 
