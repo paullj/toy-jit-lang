@@ -24,10 +24,12 @@ compile = { path = "../compile" }
 vm = { path = "../vm" }
 runtime = { path = "../runtime" }
 analyse = { path = "../analyse" }
+bench = { path = "../bench" }
+serde_json = "1.0"
 lsp = { path = "../lsp" }
 termcolor = "1.4.1"
 miette = { version = "7.6.0", features = ["fancy"] }
 thiserror = "2.0.16"
-rustyline = "15"
+rustyline = "17.0.2"
 ratatui = "0.29"
-crossterm = "0.28"
+crossterm = "0.29.0"

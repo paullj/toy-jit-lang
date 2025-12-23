@@ -18,3 +18,23 @@ run = "cargo clippy --all-targets --all-features -- -D warnings"
 [tasks.format]
 description = "Check formatting"
 run = "cargo fmt --all -- --check"
+
+[tasks.bench]
+description = "Run benchmarks"
+run = "cargo run --release -- bench"
+
+[tasks."bench:criterion"]
+description = "Run criterion benchmarks"
+run = "cargo bench --package bench"
+
+[tasks."bench:quick"]
+description = "Quick benchmark (3 iterations)"
+run = "cargo run --release -- bench -n 3"
+
+[tasks."bench:save"]
+description = "Save benchmark baseline"
+run = "cargo run --release -- bench --save-baseline benchmarks/baseline.json"
+
+[tasks."bench:compare"]
+description = "Compare with baseline"
+run = "cargo run --release -- bench --baseline benchmarks/baseline.json"
