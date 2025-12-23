@@ -1,4 +1,4 @@
-name: Benchmark
+name: benchmark
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
 
       # Run criterion benchmarks
       - name: Criterion benchmarks
-        run: cargo bench --package bench -- --noplot
+        run: cargo bench --package bench
 
       # Upload results
       - name: Upload benchmark results
@@ -55,6 +55,7 @@ jobs:
           name: benchmark-results
           path: |
             benchmarks/current.json
+            benchmarks/baseline.json
             target/criterion/
 
       # Update baseline on main
@@ -91,15 +92,35 @@ jobs:
 
             try {
               const current = JSON.parse(fs.readFileSync('benchmarks/current.json'));
+              let baseline = null;
+              try {
+                baseline = JSON.parse(fs.readFileSync('benchmarks/baseline.json'));
+              } catch (e) {}
 
-              body += '| Script | Frontend | VM Exec | Total |\n';
-              body += '|--------|----------|---------|-------|\n';
+              const formatDiff = (curr, base) => {
+                if (!base) return '';
+                const diff = ((curr - base) / base) * 100;
+                if (Math.abs(diff) < 1) return ' ≈';
+                const arrow = diff > 0 ? '↑' : '↓';
+                const color = diff > 5 ? '🔴' : diff < -5 ? '🟢' : '';
+                return ` ${color}${arrow}${Math.abs(diff).toFixed(0)}%`;
+              };
+
+              body += '| Script | Frontend | VM Total | Δ |\n';
+              body += '|--------|----------|----------|---|\n';
 
               for (const [name, data] of Object.entries(current)) {
                 const frontend = (data.lex_us + data.parse_us + data.hir_us + data.infer_us) / 1000;
-                const vm = (data.vm_exec_us || 0) / 1000;
                 const total = data.vm_total_us / 1000;
-                body += `| ${name} | ${frontend.toFixed(2)}ms | ${vm.toFixed(2)}ms | ${total.toFixed(2)}ms |\n`;
+                const baseTotal = baseline?.[name]?.vm_total_us / 1000;
+                const diff = formatDiff(total, baseTotal);
+                body += `| ${name} | ${frontend.toFixed(2)}ms | ${total.toFixed(2)}ms | ${diff} |\n`;
+              }
+
+              if (baseline) {
+                body += '\n_Compared to baseline from main_\n';
+              } else {
+                body += '\n_No baseline available for comparison_\n';
               }
             } catch (e) {
               body += '_Could not parse benchmark results_\n';
