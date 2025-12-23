@@ -127,6 +127,7 @@ fn run_inner(source: &str) -> RunResult {
                 vm::Value::Bool(_) => "Bool",
                 vm::Value::String(_) => "String",
                 vm::Value::Unit => "Unit",
+                vm::Value::Closure(_) => "Closure",
             };
             RunResult {
                 success: true,

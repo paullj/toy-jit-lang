@@ -9,3 +9,7 @@ la-arena = "0.3.1"
 hir = { path = "../hir" }
 miette = "7.6.0"
 thiserror = "2.0.16"
+
+[dev-dependencies]
+parse = { path = "../parse" }
+ast = { path = "../ast" }

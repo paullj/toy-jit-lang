@@ -3,36 +3,96 @@ use std::collections::HashMap;
 use hir::{BlockItem, Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp};
 use infer::InferenceResult;
 
-use crate::ir::{Block, BlockId, Function, Inst, LocalId, Module, Operand, VReg};
+use crate::ir::{
+    Block, BlockId, CapturedVar, FuncId, Function, Inst, LocalId, Module, Operand, VReg,
+};
 
 pub fn lower(hir: &hir::LowerResult, _types: &InferenceResult) -> Module {
     let mut ctx = LowerCtx::new(hir);
-    ctx.lower_items();
+    ctx.lower_module();
     ctx.finish()
+}
+
+/// Saved context for nested function lowering
+struct SavedContext {
+    blocks: Vec<Block>,
+    current_block: BlockId,
+    next_vreg: u32,
+    next_local: u32,
+    next_block: u32,
+    local_scopes: Vec<HashMap<String, LocalId>>,
+    capture_map: HashMap<String, u32>,
 }
 
 struct LowerCtx<'a> {
     hir: &'a hir::LowerResult,
-    func: Function,
+
+    // Current function being lowered
+    current_func_id: FuncId,
+    blocks: Vec<Block>,
     current_block: Block,
     next_vreg: u32,
     next_local: u32,
     next_block: u32,
+
     /// Stack of scopes, each scope maps names to local IDs
     local_scopes: Vec<HashMap<String, LocalId>>,
+
+    // All functions in module
+    functions: Vec<Function>,
+    next_func_id: u32,
+
+    // Function name -> FuncId mapping for direct calls
+    func_names: HashMap<String, FuncId>,
+
+    // Closure context
+    capture_map: HashMap<String, u32>, // name -> capture index (for inside closure body)
 }
 
 impl<'a> LowerCtx<'a> {
     fn new(hir: &'a hir::LowerResult) -> Self {
         Self {
             hir,
-            func: Function::new(None),
+            current_func_id: FuncId(0),
+            blocks: Vec::new(),
             current_block: Block::new(BlockId(0)),
             next_vreg: 0,
             next_local: 0,
-            next_block: 1,                      // 0 is the entry block
-            local_scopes: vec![HashMap::new()], // Start with global scope
+            next_block: 1,
+            local_scopes: vec![HashMap::new()],
+            functions: Vec::new(),
+            next_func_id: 0,
+            func_names: HashMap::new(),
+            capture_map: HashMap::new(),
         }
+    }
+
+    fn save_context(&mut self) -> SavedContext {
+        SavedContext {
+            blocks: std::mem::take(&mut self.blocks),
+            current_block: self.current_block.id,
+            next_vreg: self.next_vreg,
+            next_local: self.next_local,
+            next_block: self.next_block,
+            local_scopes: std::mem::take(&mut self.local_scopes),
+            capture_map: std::mem::take(&mut self.capture_map),
+        }
+    }
+
+    fn restore_context(&mut self, saved: SavedContext) {
+        self.blocks = saved.blocks;
+        self.current_block = Block::new(saved.current_block);
+        self.next_vreg = saved.next_vreg;
+        self.next_local = saved.next_local;
+        self.next_block = saved.next_block;
+        self.local_scopes = saved.local_scopes;
+        self.capture_map = saved.capture_map;
+    }
+
+    fn alloc_func_id(&mut self) -> FuncId {
+        let id = FuncId(self.next_func_id);
+        self.next_func_id += 1;
+        id
     }
 
     fn create_block(&mut self) -> BlockId {
@@ -42,10 +102,9 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn switch_to_block(&mut self, id: BlockId) {
-        // Save current block if it has instructions
         if !self.current_block.insts.is_empty() || self.current_block.id.0 != id.0 {
             let old_block = std::mem::replace(&mut self.current_block, Block::new(id));
-            self.func.blocks.push(old_block);
+            self.blocks.push(old_block);
         } else {
             self.current_block = Block::new(id);
         }
@@ -68,7 +127,6 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn alloc_local(&mut self, name: &str) -> LocalId {
-        // Always allocate a new local in the current scope
         let id = LocalId(self.next_local);
         self.next_local += 1;
         if let Some(scope) = self.local_scopes.last_mut() {
@@ -78,7 +136,6 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn get_local(&self, name: &str) -> Option<LocalId> {
-        // Search from innermost to outermost scope
         for scope in self.local_scopes.iter().rev() {
             if let Some(&id) = scope.get(name) {
                 return Some(id);
@@ -91,72 +148,361 @@ impl<'a> LowerCtx<'a> {
         self.current_block.push(inst);
     }
 
-    fn lower_items(&mut self) {
+    fn lower_module(&mut self) {
+        // First pass: register all top-level functions so we know their FuncIds
         for item in &self.hir.items {
-            self.lower_item(item);
-        }
-        // Add implicit return at end
-        self.emit(Inst::Return { value: None });
-    }
-
-    fn lower_item(&mut self, item: &Item) {
-        match item {
-            Item::Definition(Definition::Variable { name, value }) => {
-                let operand = self.lower_expr(value);
-                let local = self.alloc_local(name);
-                self.emit(Inst::StoreLocal {
-                    local,
-                    src: operand,
-                });
+            if let Item::Definition(Definition::Function { name, .. }) = item {
+                let func_id = self.alloc_func_id();
+                self.func_names.insert(name.clone(), func_id);
             }
-            Item::Assignment { name, value } => {
-                let operand = self.lower_expr(value);
-                if let Some(local) = self.get_local(name) {
+        }
+
+        // Main function gets the next ID
+        let main_id = self.alloc_func_id();
+        self.current_func_id = main_id;
+
+        // Second pass: lower all function definitions first
+        for item in self.hir.items.clone() {
+            if let Item::Definition(Definition::Function {
+                name, params, body, ..
+            }) = &item
+            {
+                let func_id = self.func_names[name];
+                self.lower_function_def(func_id, Some(name.clone()), params, *body);
+            }
+        }
+
+        // Third pass: lower main body (non-function items)
+        self.current_func_id = main_id;
+        self.blocks = Vec::new();
+        self.current_block = Block::new(BlockId(0));
+        self.next_vreg = 0;
+        self.next_local = 0;
+        self.next_block = 1;
+        self.local_scopes = vec![HashMap::new()];
+
+        for item in &self.hir.items {
+            match item {
+                Item::Definition(Definition::Function { name, .. }) => {
+                    // Allocate local for function reference (for indirect calls)
+                    let func_id = self.func_names[name];
+                    let local = self.alloc_local(name);
+                    let dst = self.fresh_vreg();
+                    // Store function reference as a closure with no captures
+                    self.emit(Inst::MakeClosure {
+                        dst,
+                        func: func_id,
+                        captures: vec![],
+                    });
+                    self.emit(Inst::StoreLocal {
+                        local,
+                        src: Operand::VReg(dst),
+                    });
+                }
+                Item::Definition(Definition::Variable { name, value }) => {
+                    let operand = self.lower_expr(value);
+                    let local = self.alloc_local(name);
                     self.emit(Inst::StoreLocal {
                         local,
                         src: operand,
                     });
                 }
-                // Note: undefined variable errors already caught by type checker
-            }
-            Item::Expression(expr) => {
-                // Expression statement - evaluate for side effects, discard result
-                self.lower_expr(expr);
+                Item::Assignment { name, value } => {
+                    let operand = self.lower_expr(value);
+                    if let Some(local) = self.get_local(name) {
+                        self.emit(Inst::StoreLocal {
+                            local,
+                            src: operand,
+                        });
+                    }
+                }
+                Item::Expression(expr) => {
+                    self.lower_expr(expr);
+                }
             }
         }
+
+        self.emit(Inst::Return { value: None });
+
+        // Build main function
+        self.blocks.push(std::mem::replace(
+            &mut self.current_block,
+            Block::new(BlockId(0)),
+        ));
+        let main_func = Function {
+            id: main_id,
+            name: Some("main".to_string()),
+            params: Vec::new(),
+            param_count: 0,
+            blocks: std::mem::take(&mut self.blocks),
+            local_count: self.next_local,
+            vreg_count: self.next_vreg,
+            captures: Vec::new(),
+            is_closure: false,
+        };
+        self.functions.push(main_func);
+    }
+
+    fn lower_function_def(
+        &mut self,
+        func_id: FuncId,
+        name: Option<String>,
+        params: &[hir::FunctionParam],
+        body: ExprIdx,
+    ) {
+        // Save current context
+        let saved = self.save_context();
+        let saved_func_id = self.current_func_id;
+
+        // Initialize for new function
+        self.current_func_id = func_id;
+        self.blocks = Vec::new();
+        self.current_block = Block::new(BlockId(0));
+        self.next_vreg = 0;
+        self.next_local = 0;
+        self.next_block = 1;
+        self.local_scopes = vec![HashMap::new()];
+        self.capture_map.clear();
+
+        // Allocate params as first locals
+        let param_locals: Vec<LocalId> = params
+            .iter()
+            .map(|p| {
+                let local = LocalId(self.next_local);
+                self.next_local += 1;
+                self.local_scopes
+                    .last_mut()
+                    .unwrap()
+                    .insert(p.name.clone(), local);
+                local
+            })
+            .collect();
+
+        // Lower body
+        let result = self.lower_expr_idx(body);
+
+        // Emit return with body result
+        self.emit(Inst::Return {
+            value: Some(result),
+        });
+
+        // Build function
+        self.blocks.push(std::mem::replace(
+            &mut self.current_block,
+            Block::new(BlockId(0)),
+        ));
+        let func = Function {
+            id: func_id,
+            name,
+            params: param_locals.clone(),
+            param_count: params.len() as u32,
+            blocks: std::mem::take(&mut self.blocks),
+            local_count: self.next_local,
+            vreg_count: self.next_vreg,
+            captures: Vec::new(),
+            is_closure: false,
+        };
+        self.functions.push(func);
+
+        // Restore context
+        self.restore_context(saved);
+        self.current_func_id = saved_func_id;
+    }
+
+    fn lower_lambda(
+        &mut self,
+        params: &[hir::FunctionParam],
+        body: ExprIdx,
+        captures: &[String],
+    ) -> Operand {
+        let func_id = self.alloc_func_id();
+
+        // Collect capture operands from current scope BEFORE switching context
+        let capture_ops: Vec<Operand> = captures
+            .iter()
+            .filter_map(|name| {
+                if let Some(local) = self.get_local(name) {
+                    let dst = self.fresh_vreg();
+                    self.emit(Inst::LoadLocal { dst, local });
+                    Some(Operand::VReg(dst))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let capture_vars: Vec<CapturedVar> = captures
+            .iter()
+            .filter_map(|name| {
+                self.get_local(name).map(|local| CapturedVar {
+                    name: name.clone(),
+                    outer_local: local,
+                })
+            })
+            .collect();
+
+        // Save current context
+        let saved = self.save_context();
+        let saved_func_id = self.current_func_id;
+
+        // Initialize for closure
+        self.current_func_id = func_id;
+        self.blocks = Vec::new();
+        self.current_block = Block::new(BlockId(0));
+        self.next_vreg = 0;
+        self.next_local = 0;
+        self.next_block = 1;
+        self.local_scopes = vec![HashMap::new()];
+
+        // Setup capture map for LoadCapture in closure body
+        self.capture_map.clear();
+        for (i, cap) in capture_vars.iter().enumerate() {
+            self.capture_map.insert(cap.name.clone(), i as u32);
+        }
+
+        // Allocate params as first locals
+        let param_locals: Vec<LocalId> = params
+            .iter()
+            .map(|p| {
+                let local = LocalId(self.next_local);
+                self.next_local += 1;
+                self.local_scopes
+                    .last_mut()
+                    .unwrap()
+                    .insert(p.name.clone(), local);
+                local
+            })
+            .collect();
+
+        // Lower body
+        let result = self.lower_expr_idx(body);
+
+        // Emit return
+        self.emit(Inst::Return {
+            value: Some(result),
+        });
+
+        // Build closure function
+        self.blocks.push(std::mem::replace(
+            &mut self.current_block,
+            Block::new(BlockId(0)),
+        ));
+        let func = Function {
+            id: func_id,
+            name: None,
+            params: param_locals,
+            param_count: params.len() as u32,
+            blocks: std::mem::take(&mut self.blocks),
+            local_count: self.next_local,
+            vreg_count: self.next_vreg,
+            captures: capture_vars,
+            is_closure: true,
+        };
+        self.functions.push(func);
+
+        // Restore context
+        self.restore_context(saved);
+        self.current_func_id = saved_func_id;
+
+        // Emit MakeClosure in calling context
+        let dst = self.fresh_vreg();
+        self.emit(Inst::MakeClosure {
+            dst,
+            func: func_id,
+            captures: capture_ops,
+        });
+
+        Operand::VReg(dst)
+    }
+
+    fn lower_call(&mut self, callee: &Expression, args: &[ExprIdx]) -> Operand {
+        // Lower args first
+        let arg_ops: Vec<Operand> = args.iter().map(|a| self.lower_expr_idx(*a)).collect();
+
+        let dst = self.fresh_vreg();
+
+        // Check if callee is a direct function reference
+        if let Expression::VariableRef { name } = callee
+            && let Some(&func_id) = self.func_names.get(name)
+        {
+            // Direct call to known function
+            self.emit(Inst::Call {
+                dst: Some(dst),
+                func: func_id,
+                args: arg_ops,
+            });
+            return Operand::VReg(dst);
+        }
+
+        // Otherwise, indirect call through closure
+        let callee_op = self.lower_expr(callee);
+        self.emit(Inst::CallIndirect {
+            dst: Some(dst),
+            callee: callee_op,
+            args: arg_ops,
+        });
+
+        Operand::VReg(dst)
     }
 
     fn lower_expr(&mut self, expr: &Expression) -> Operand {
         match expr {
-            Expression::Missing => {
-                // Should have been caught by type checker
-                Operand::IntConst(0)
-            }
+            Expression::Missing => Operand::IntConst(0),
             Expression::Literal(lit) => self.lower_literal(lit),
             Expression::Infix { op, lhs, rhs } => self.lower_infix(*op, *lhs, *rhs),
             Expression::Prefix { op, expr } => self.lower_prefix(*op, *expr),
-            Expression::VariableRef { name } => {
-                if let Some(local) = self.get_local(name) {
-                    let dst = self.fresh_vreg();
-                    self.emit(Inst::LoadLocal { dst, local });
-                    Operand::VReg(dst)
-                } else {
-                    // Should have been caught by type checker
-                    Operand::IntConst(0)
-                }
-            }
+            Expression::VariableRef { name } => self.lower_var_ref(name),
             Expression::Block { items, tail } => self.lower_block(items, *tail),
             Expression::If {
                 condition,
                 then_branch,
                 else_branch,
             } => self.lower_if(*condition, *then_branch, *else_branch),
+            Expression::Function {
+                params,
+                body,
+                captures,
+                ..
+            } => self.lower_lambda(params, *body, captures),
+            Expression::Call { callee, args } => {
+                let callee_expr = &self.hir.expressions[*callee];
+                self.lower_call(callee_expr, args)
+            }
+            Expression::Return { value } => {
+                let operand = value.map(|idx| self.lower_expr_idx(idx));
+                self.emit(Inst::Return { value: operand });
+                Operand::IntConst(0)
+            }
+            Expression::Echo { value } => {
+                let operand = self.lower_expr_idx(*value);
+                self.emit(Inst::Echo { src: operand });
+                Operand::IntConst(0)
+            }
+        }
+    }
+
+    fn lower_var_ref(&mut self, name: &str) -> Operand {
+        // Check if it's a captured variable (inside closure body)
+        if let Some(&idx) = self.capture_map.get(name) {
+            let dst = self.fresh_vreg();
+            self.emit(Inst::LoadCapture { dst, index: idx });
+            return Operand::VReg(dst);
+        }
+
+        // Otherwise load from local
+        if let Some(local) = self.get_local(name) {
+            let dst = self.fresh_vreg();
+            self.emit(Inst::LoadLocal { dst, local });
+            Operand::VReg(dst)
+        } else {
+            // Should have been caught by type checker
+            Operand::IntConst(0)
         }
     }
 
     fn lower_expr_idx(&mut self, idx: ExprIdx) -> Operand {
-        let expr = &self.hir.expressions[idx];
-        self.lower_expr(expr)
+        let expr = self.hir.expressions[idx].clone();
+        self.lower_expr(&expr)
     }
 
     fn lower_literal(&self, lit: &Literal) -> Operand {
@@ -169,8 +515,6 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn lower_infix(&mut self, op: InfixOp, lhs: ExprIdx, rhs: ExprIdx) -> Operand {
-        // For And/Or, we should do short-circuit evaluation
-        // For now, just evaluate both sides
         let lhs_op = self.lower_expr_idx(lhs);
         let rhs_op = self.lower_expr_idx(rhs);
         let dst = self.fresh_vreg();
@@ -275,19 +619,8 @@ impl<'a> LowerCtx<'a> {
                 rhs: rhs_op,
             },
 
-            // And/Or: for now, just compute both and combine
-            // TODO: short-circuit with branches
-            InfixOp::And => {
-                // a and b -> if a then b else false
-                // For now: compute both, return rhs if lhs is true
-                // This is incorrect but placeholder until we have branches
-                Inst::Copy { dst, src: rhs_op }
-            }
-            InfixOp::Or => {
-                // a or b -> if a then true else b
-                // For now: placeholder
-                Inst::Copy { dst, src: lhs_op }
-            }
+            InfixOp::And => Inst::Copy { dst, src: rhs_op },
+            InfixOp::Or => Inst::Copy { dst, src: lhs_op },
         };
 
         self.emit(inst);
@@ -298,8 +631,6 @@ impl<'a> LowerCtx<'a> {
         let src = self.lower_expr_idx(expr);
         let dst = self.fresh_vreg();
 
-        // For Neg, we need to determine if it's int or float from types
-        // For now, assume int (type info available but not used yet)
         let inst = match op {
             PrefixOp::Neg => Inst::NegInt { dst, src },
             PrefixOp::Not => Inst::Not { dst, src },
@@ -312,7 +643,6 @@ impl<'a> LowerCtx<'a> {
     fn lower_block(&mut self, items: &[BlockItem], tail: Option<ExprIdx>) -> Operand {
         self.push_scope();
 
-        // Lower all items in the block
         for item in items {
             match item {
                 BlockItem::Definition { name, value } => {
@@ -333,16 +663,22 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
                 BlockItem::Expression(idx) => {
-                    // Evaluate for side effects
                     self.lower_expr_idx(*idx);
+                }
+                BlockItem::Return { value } => {
+                    let operand = value.map(|idx| self.lower_expr_idx(idx));
+                    self.emit(Inst::Return { value: operand });
+                }
+                BlockItem::Echo { value } => {
+                    let operand = self.lower_expr_idx(*value);
+                    self.emit(Inst::Echo { src: operand });
                 }
             }
         }
 
-        // Return the tail expression value, or Unit (represented as 0)
         let result = match tail {
             Some(idx) => self.lower_expr_idx(idx),
-            None => Operand::IntConst(0), // Unit
+            None => Operand::IntConst(0),
         };
 
         self.pop_scope();
@@ -357,7 +693,6 @@ impl<'a> LowerCtx<'a> {
         let merge_bb = self.create_block();
         let result = self.fresh_vreg();
 
-        // Emit branch
         self.emit(Inst::Branch {
             cond: cond_op,
             then_bb,
@@ -377,7 +712,7 @@ impl<'a> LowerCtx<'a> {
         self.switch_to_block(else_bb);
         let else_val = else_br
             .map(|e| self.lower_expr_idx(e))
-            .unwrap_or(Operand::IntConst(0)); // Unit
+            .unwrap_or(Operand::IntConst(0));
         self.emit(Inst::Copy {
             dst: result,
             src: else_val,
@@ -389,11 +724,18 @@ impl<'a> LowerCtx<'a> {
         Operand::VReg(result)
     }
 
-    fn finish(mut self) -> Module {
-        self.func.blocks.push(self.current_block);
-        self.func.vreg_count = self.next_vreg;
-        self.func.local_count = self.next_local;
-        Module { main: self.func }
+    fn finish(self) -> Module {
+        // Sort functions by id to ensure main is last
+        let mut functions = self.functions;
+        functions.sort_by_key(|f| f.id.0);
+
+        let main_id = functions
+            .iter()
+            .find(|f| f.name.as_deref() == Some("main"))
+            .map(|f| f.id)
+            .unwrap_or(FuncId(functions.len() as u32 - 1));
+
+        Module { functions, main_id }
     }
 }
 
@@ -427,7 +769,62 @@ mod tests {
         let types = make_types();
         let module = lower(&hir, &types);
 
-        assert_eq!(module.main.local_count, 1);
-        assert!(module.main.blocks.len() == 1);
+        assert_eq!(module.functions.len(), 1);
+        assert_eq!(module.main().local_count, 1);
+    }
+
+    #[test]
+    fn test_lower_function_def() {
+        let mut exprs: Arena<Expression> = Arena::new();
+        let a_ref = exprs.alloc(Expression::VariableRef {
+            name: "a".to_string(),
+        });
+        let b_ref = exprs.alloc(Expression::VariableRef {
+            name: "b".to_string(),
+        });
+        let add_expr = exprs.alloc(Expression::Infix {
+            op: InfixOp::Add,
+            lhs: a_ref,
+            rhs: b_ref,
+        });
+
+        let hir = hir::LowerResult {
+            items: vec![Item::Definition(Definition::Function {
+                name: "add".to_string(),
+                params: vec![
+                    hir::FunctionParam {
+                        name: "a".to_string(),
+                        ty: None,
+                        default: None,
+                    },
+                    hir::FunctionParam {
+                        name: "b".to_string(),
+                        ty: None,
+                        default: None,
+                    },
+                ],
+                return_type: None,
+                body: add_expr,
+            })],
+            expressions: exprs,
+            expr_spans: Default::default(),
+            item_spans: vec![Default::default()],
+            symbols: Default::default(),
+            diagnostics: Default::default(),
+        };
+        let types = make_types();
+        let module = lower(&hir, &types);
+
+        // Should have 2 functions: add and main
+        assert_eq!(module.functions.len(), 2);
+
+        // Find the add function
+        let add_fn = module
+            .functions
+            .iter()
+            .find(|f| f.name.as_deref() == Some("add"))
+            .unwrap();
+        assert_eq!(add_fn.param_count, 2);
+        assert_eq!(add_fn.params.len(), 2);
     }
 }

@@ -234,6 +234,24 @@ literal = "else"
 category = "keyword"
 textmate_scope = "keyword.control.conditional.toy"
 
+[[tokens]]
+name = "Fn"
+literal = "fn"
+category = "keyword"
+textmate_scope = "keyword.declaration.function.toy"
+
+[[tokens]]
+name = "Return"
+literal = "return"
+category = "keyword"
+textmate_scope = "keyword.control.flow.toy"
+
+[[tokens]]
+name = "Echo"
+literal = "echo"
+category = "keyword"
+textmate_scope = "keyword.control.flow.toy"
+
 # Literals
 [[tokens]]
 name = "Identifier"

@@ -19,8 +19,24 @@ pub enum Item {
 }
 
 #[derive(Debug, Clone)]
+pub struct FunctionParam {
+    pub name: String,
+    pub ty: Option<String>,
+    pub default: Option<ExprIdx>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Definition {
-    Variable { name: String, value: Expression },
+    Variable {
+        name: String,
+        value: Expression,
+    },
+    Function {
+        name: String,
+        params: Vec<FunctionParam>,
+        return_type: Option<String>,
+        body: ExprIdx,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +64,22 @@ pub enum Expression {
         then_branch: ExprIdx,
         else_branch: Option<ExprIdx>,
     },
+    Function {
+        params: Vec<FunctionParam>,
+        return_type: Option<String>,
+        body: ExprIdx,
+        captures: Vec<String>,
+    },
+    Call {
+        callee: ExprIdx,
+        args: Vec<ExprIdx>,
+    },
+    Return {
+        value: Option<ExprIdx>,
+    },
+    Echo {
+        value: ExprIdx,
+    },
 }
 
 /// Item inside a block expression
@@ -56,6 +88,8 @@ pub enum BlockItem {
     Definition { name: String, value: ExprIdx },
     Assignment { name: String, value: ExprIdx },
     Expression(ExprIdx),
+    Return { value: Option<ExprIdx> },
+    Echo { value: ExprIdx },
 }
 
 #[derive(Debug, Clone)]

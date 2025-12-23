@@ -1,3 +1,7 @@
+mod function;
 mod variable;
 
-pub(crate) use variable::{variable_definition_inferred, variable_definition_typed};
+pub(crate) use function::function_definition_or_expression;
+pub(crate) use variable::{
+    type_annotation, variable_definition_inferred, variable_definition_typed,
+};

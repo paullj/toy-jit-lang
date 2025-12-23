@@ -1,7 +1,9 @@
-mod expression;
+pub(crate) mod expression;
 mod variable_assignment;
 
-pub(crate) use expression::{EXPR_FIRST, expression, inner_expression_with_binding_power};
+pub(crate) use expression::{
+    EXPR_FIRST, call_expression, expression, inner_expression_with_binding_power,
+};
 pub(crate) use variable_assignment::variable_assignment;
 
 use crate::{Parser, TokenSet, marker::CompletedMarker};

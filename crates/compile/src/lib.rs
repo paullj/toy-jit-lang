@@ -4,7 +4,7 @@ mod compiler;
 mod constant;
 mod display;
 
-pub use bytecode::{ConstIdx, Instruction, Label, LocalSlot, Reg};
+pub use bytecode::{ConstIdx, FuncIdx, Instruction, Label, LocalSlot, Reg};
 pub use chunk::{Chunk, CompiledModule};
 pub use compiler::compile;
 pub use constant::{Constant, ConstantPool};

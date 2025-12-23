@@ -25,7 +25,7 @@ pub(crate) fn variable_definition_typed(p: &mut Parser, m: Marker) -> CompletedM
     m.complete(p, SyntaxKind::VariableDefinition)
 }
 
-fn type_annotation(p: &mut Parser) -> CompletedMarker {
+pub(crate) fn type_annotation(p: &mut Parser) -> CompletedMarker {
     let m = p.start();
     p.expect(TokenKind::Identifier, "type name");
     m.complete(p, SyntaxKind::TypeAnnotation)

@@ -74,6 +74,7 @@ pub fn infer_with_state(lower_result: &hir::LowerResult, state: InferState) -> I
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ast::AstNode;
     use hir::{Definition, Expression, Item, Literal};
 
     fn make_lower_result(items: Vec<Item>) -> hir::LowerResult {
@@ -86,6 +87,14 @@ mod tests {
             symbols: Default::default(),
             diagnostics: Default::default(),
         }
+    }
+
+    /// Helper to infer types from source code using the full pipeline
+    fn infer_from_source(source: &str) -> InferenceResult {
+        let (syntax, _errors) = parse::parse(source);
+        let root = ast::Root::cast(syntax).expect("failed to cast to Root");
+        let hir = hir::lower(root);
+        infer(&hir)
     }
 
     #[test]
@@ -192,5 +201,144 @@ mod tests {
             infer1.result.has_errors(),
             "assignment to undefined var should error"
         );
+    }
+
+    // ===================== Function Type Inference Tests =====================
+
+    #[test]
+    fn test_function_simple() {
+        let result = infer_from_source("fn add(a, b) { a + b }");
+        assert!(!result.has_errors(), "no errors expected");
+
+        let fn_ty = result
+            .get_variable_type("add")
+            .expect("add should be defined");
+        // Should be (int, int) -> int from the + operator
+        assert!(
+            matches!(fn_ty, Type::Function { params, ret } if params.len() == 2 && **ret == Type::Integer),
+            "expected (int, int) -> int, got {fn_ty}"
+        );
+    }
+
+    #[test]
+    fn test_function_with_type_annotation() {
+        let result = infer_from_source("fn greet(name: string): string { name }");
+        assert!(!result.has_errors(), "no errors expected");
+
+        let fn_ty = result
+            .get_variable_type("greet")
+            .expect("greet should be defined");
+        assert!(
+            matches!(fn_ty, Type::Function { params, ret }
+                if params == &[Type::String] && **ret == Type::String),
+            "expected string -> string, got {fn_ty}"
+        );
+    }
+
+    #[test]
+    fn test_function_call() {
+        let result = infer_from_source(
+            "fn double(x) { x + x }
+             double(5)",
+        );
+        assert!(!result.has_errors(), "no errors expected");
+    }
+
+    #[test]
+    fn test_lambda_expression() {
+        let result = infer_from_source("inc := fn(x) { x + 1 }");
+        assert!(!result.has_errors(), "no errors expected");
+
+        let fn_ty = result
+            .get_variable_type("inc")
+            .expect("inc should be defined");
+        assert!(
+            matches!(fn_ty, Type::Function { params, ret }
+                if params.len() == 1 && **ret == Type::Integer),
+            "expected int -> int, got {fn_ty}"
+        );
+    }
+
+    #[test]
+    fn test_recursive_function() {
+        let result = infer_from_source(
+            "fn fac(n) {
+                if n <= 1 { 1 }
+                else { n * fac(n - 1) }
+             }",
+        );
+        assert!(!result.has_errors(), "no errors expected");
+
+        let fn_ty = result
+            .get_variable_type("fac")
+            .expect("fac should be defined");
+        assert!(
+            matches!(fn_ty, Type::Function { params, ret }
+                if params == &[Type::Integer] && **ret == Type::Integer),
+            "expected int -> int, got {fn_ty}"
+        );
+    }
+
+    #[test]
+    fn test_higher_order_function() {
+        let result = infer_from_source(
+            "fn apply(f, x) { f(x) }
+             fn double(n) { n + n }
+             apply(double, 5)",
+        );
+        assert!(!result.has_errors(), "no errors expected");
+    }
+
+    #[test]
+    fn test_function_call_arity_mismatch() {
+        let result = infer_from_source(
+            "fn add(a, b) { a + b }
+             add(1)",
+        );
+        assert!(result.has_errors(), "should error on arity mismatch");
+    }
+
+    #[test]
+    fn test_call_non_function() {
+        let result = infer_from_source(
+            "x := 42
+             x(1)",
+        );
+        assert!(
+            result.has_errors(),
+            "should error when calling non-function"
+        );
+    }
+
+    #[test]
+    fn test_return_type_mismatch() {
+        let result = infer_from_source("fn foo(): int { true }");
+        assert!(result.has_errors(), "should error on return type mismatch");
+    }
+
+    #[test]
+    fn test_function_no_params() {
+        let result = infer_from_source("fn answer() { 42 }");
+        assert!(!result.has_errors(), "no errors expected");
+
+        let fn_ty = result
+            .get_variable_type("answer")
+            .expect("answer should be defined");
+        assert!(
+            matches!(fn_ty, Type::Function { params, ret }
+                if params.is_empty() && **ret == Type::Integer),
+            "expected () -> int, got {fn_ty}"
+        );
+    }
+
+    #[test]
+    fn test_polymorphic_identity() {
+        // Identity function should work with different types
+        let result = infer_from_source(
+            "fn id(x) { x }
+             id(42)
+             id(true)",
+        );
+        assert!(!result.has_errors(), "polymorphic identity should work");
     }
 }

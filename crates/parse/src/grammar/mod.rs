@@ -2,7 +2,7 @@ mod declaration;
 mod definition;
 mod item;
 mod root;
-mod statement;
+pub(crate) mod statement;
 
 pub(crate) use definition::*;
 pub(crate) use item::item;

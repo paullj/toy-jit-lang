@@ -6,6 +6,7 @@ use crate::constant::ConstantPool;
 pub struct Chunk {
     pub instructions: Vec<Instruction>,
     pub constants: ConstantPool,
+    pub param_count: u8,
     pub local_count: u32,
     pub register_count: u32,
 }
@@ -15,6 +16,7 @@ impl Chunk {
         Self {
             instructions: Vec::new(),
             constants: ConstantPool::new(),
+            param_count: 0,
             local_count: 0,
             register_count: 0,
         }
@@ -39,8 +41,19 @@ impl Default for Chunk {
     }
 }
 
-/// A compiled module
+/// A compiled module containing all functions
 #[derive(Debug, Clone)]
 pub struct CompiledModule {
-    pub main: Chunk,
+    pub chunks: Vec<Chunk>,
+    pub main_idx: usize,
+}
+
+impl CompiledModule {
+    pub fn main(&self) -> &Chunk {
+        &self.chunks[self.main_idx]
+    }
+
+    pub fn get_chunk(&self, idx: usize) -> &Chunk {
+        &self.chunks[idx]
+    }
 }

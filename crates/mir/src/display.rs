@@ -46,6 +46,50 @@ impl fmt::Display for Inst {
             }
             Inst::Return { value: Some(v) } => write!(f, "ret {}", v),
             Inst::Return { value: None } => write!(f, "ret"),
+
+            // Function calls
+            Inst::Call { dst, func, args } => {
+                if let Some(d) = dst {
+                    write!(f, "{} = ", d)?;
+                }
+                write!(f, "call {}", func)?;
+                for arg in args {
+                    write!(f, " {}", arg)?;
+                }
+                Ok(())
+            }
+            Inst::CallIndirect { dst, callee, args } => {
+                if let Some(d) = dst {
+                    write!(f, "{} = ", d)?;
+                }
+                write!(f, "call_indirect {}", callee)?;
+                for arg in args {
+                    write!(f, " {}", arg)?;
+                }
+                Ok(())
+            }
+
+            // Closures
+            Inst::MakeClosure {
+                dst,
+                func,
+                captures,
+            } => {
+                write!(f, "{} = make_closure {}", dst, func)?;
+                for cap in captures {
+                    write!(f, " {}", cap)?;
+                }
+                Ok(())
+            }
+            Inst::LoadCapture { dst, index } => {
+                write!(f, "{} = load_capture {}", dst, index)
+            }
+            Inst::StoreCapture { index, src } => {
+                write!(f, "store_capture {} {}", index, src)
+            }
+            Inst::Echo { src } => {
+                write!(f, "echo {}", src)
+            }
         }
     }
 }
@@ -62,13 +106,27 @@ impl fmt::Display for Block {
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = self.name.as_deref().unwrap_or("main");
-        writeln!(f, "fn {} {{", name)?;
+        let name = self.name.as_deref().unwrap_or("anon");
+        write!(f, "fn {} {} (", self.id, name)?;
+        for (i, param) in self.params.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", param)?;
+        }
+        writeln!(f, ") {{")?;
         writeln!(
             f,
-            "  ; locals: {}, vregs: {}",
-            self.local_count, self.vreg_count
+            "  ; locals: {}, vregs: {}, closure: {}",
+            self.local_count, self.vreg_count, self.is_closure
         )?;
+        if !self.captures.is_empty() {
+            write!(f, "  ; captures:")?;
+            for cap in &self.captures {
+                write!(f, " {}@{}", cap.name, cap.outer_local)?;
+            }
+            writeln!(f)?;
+        }
         for block in &self.blocks {
             for line in block.to_string().lines() {
                 writeln!(f, "  {}", line)?;
@@ -80,6 +138,10 @@ impl fmt::Display for Function {
 
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.main)
+        writeln!(f, "; main: {}", self.main_id)?;
+        for func in &self.functions {
+            write!(f, "{}", func)?;
+        }
+        Ok(())
     }
 }

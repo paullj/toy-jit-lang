@@ -61,14 +61,65 @@ pub(crate) const EXPR_FIRST: TokenSet = LITERAL_SET
     .union(PREFIX_SET)
     .union(TokenSet::single(TokenKind::LeftParenthesis))
     .union(TokenSet::single(TokenKind::LeftBrace))
-    .union(TokenSet::single(TokenKind::If));
+    .union(TokenSet::single(TokenKind::If))
+    .union(TokenSet::single(TokenKind::Fn));
 
 /// Recovery set for expression parsing (skip to newline or expr start)
 const EXPR_RECOVERY: TokenSet = EXPR_FIRST.union(TokenSet::single(TokenKind::NewLine));
 
 fn expression_with_binding_power(p: &mut Parser, min_bp: u8) -> Option<CompletedMarker> {
-    let lhs = lhs(p)?;
+    let mut lhs = lhs(p)?;
+
+    // Handle postfix operations (call expressions)
+    loop {
+        if p.at_newline_terminator() {
+            break;
+        }
+
+        if p.at(TokenKind::LeftParenthesis) {
+            lhs = call_expression(p, lhs);
+        } else {
+            break;
+        }
+    }
+
     inner_expression_with_binding_power(p, lhs, min_bp)
+}
+
+pub(crate) fn call_expression(p: &mut Parser, callee: CompletedMarker) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::LeftParenthesis));
+
+    let m = callee.precede(p);
+    p.consume(); // eat '('
+    p.enter_delimiter();
+
+    let mut first = true;
+    while !p.at(TokenKind::RightParenthesis) && !p.is_at_end() {
+        if !first && !p.eat(TokenKind::Comma) {
+            break;
+        }
+        first = false;
+
+        // Handle trailing comma
+        if p.at(TokenKind::RightParenthesis) {
+            break;
+        }
+
+        expression(p);
+    }
+
+    p.exit_delimiter();
+    if !p.eat(TokenKind::RightParenthesis) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "')'".to_string(),
+            found,
+        });
+    }
+
+    m.complete(p, SyntaxKind::CallExpression)
 }
 
 pub(crate) fn inner_expression_with_binding_power(
@@ -135,6 +186,7 @@ fn lhs(p: &mut Parser) -> Option<CompletedMarker> {
         Some(TokenKind::LeftParenthesis) => Some(parenthesis_expression(p)),
         Some(TokenKind::LeftBrace) => Some(block_expression(p)),
         Some(TokenKind::If) => Some(if_expression(p)),
+        Some(TokenKind::Fn) => Some(crate::grammar::function_definition_or_expression(p)),
         _ => {
             p.recover("expected expression", EXPR_RECOVERY);
             None
@@ -194,7 +246,7 @@ fn parenthesis_expression(p: &mut Parser) -> CompletedMarker {
     m.complete(p, SyntaxKind::ParenthesisExpression)
 }
 
-fn block_expression(p: &mut Parser) -> CompletedMarker {
+pub(crate) fn block_expression(p: &mut Parser) -> CompletedMarker {
     debug_assert!(p.at(TokenKind::LeftBrace));
 
     let m = p.start();

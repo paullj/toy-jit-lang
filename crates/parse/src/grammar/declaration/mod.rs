@@ -1,1 +1,1 @@
-// TODO: Implement type, struct, enum, and trait? declarations
+// TODO: Implement type, struct, enum, and trait? declarations or are those definitions too?

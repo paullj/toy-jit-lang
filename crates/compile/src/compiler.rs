@@ -1,14 +1,25 @@
 use std::collections::HashMap;
 
-use mir::{BlockId, Inst, LocalId, Module, Operand, VReg};
+use mir::{BlockId, FuncId, Inst, LocalId, Module, Operand, VReg};
 
-use crate::bytecode::{Instruction, Label, LocalSlot, Reg};
+use crate::bytecode::{FuncIdx, Instruction, Label, LocalSlot, Reg};
 use crate::chunk::{Chunk, CompiledModule};
 
 pub fn compile(mir: &Module) -> CompiledModule {
-    let mut compiler = Compiler::new();
-    compiler.compile_function(&mir.main);
-    compiler.finish()
+    let chunks: Vec<Chunk> = mir
+        .functions
+        .iter()
+        .map(|func| {
+            let mut compiler = Compiler::new();
+            compiler.compile_function(func);
+            compiler.into_chunk()
+        })
+        .collect();
+
+    CompiledModule {
+        chunks,
+        main_idx: mir.main_id.0 as usize,
+    }
 }
 
 struct Compiler {
@@ -49,6 +60,12 @@ impl Compiler {
         r
     }
 
+    fn alloc_consecutive_regs(&mut self, count: usize) -> Reg {
+        let base = Reg(self.next_reg);
+        self.next_reg += count as u32;
+        base
+    }
+
     fn vreg_to_physical(&mut self, vreg: VReg) -> Reg {
         if let Some(&reg) = self.vreg_to_reg.get(&vreg) {
             return reg;
@@ -63,6 +80,7 @@ impl Compiler {
     }
 
     fn compile_function(&mut self, func: &mir::Function) {
+        self.chunk.param_count = func.param_count as u8;
         self.chunk.local_count = func.local_count;
 
         // First pass: assign labels to blocks and emit code
@@ -353,8 +371,83 @@ impl Compiler {
                 self.label_patches.push((inst_idx, else_label));
             }
 
-            Inst::Return { .. } => {
-                self.emit(Instruction::Halt);
+            Inst::Return { value } => {
+                let src = value.as_ref().map(|v| self.load_operand(v));
+                self.emit(Instruction::Return { src });
+            }
+
+            // Function calls
+            Inst::Call { dst, func, args } => {
+                // Load args into consecutive registers
+                let arg_base = self.alloc_consecutive_regs(args.len());
+                for (i, arg) in args.iter().enumerate() {
+                    let r = Reg(arg_base.0 + i as u32);
+                    self.load_operand_to(arg, r);
+                }
+
+                let dst_reg = dst.map(|v| self.vreg_to_physical(v));
+                self.emit(Instruction::Call {
+                    dst: dst_reg,
+                    func_idx: func_id_to_idx(*func),
+                    arg_base,
+                    arg_count: args.len() as u8,
+                });
+            }
+            Inst::CallIndirect { dst, callee, args } => {
+                let callee_reg = self.load_operand(callee);
+
+                // Load args into consecutive registers
+                let arg_base = self.alloc_consecutive_regs(args.len());
+                for (i, arg) in args.iter().enumerate() {
+                    let r = Reg(arg_base.0 + i as u32);
+                    self.load_operand_to(arg, r);
+                }
+
+                let dst_reg = dst.map(|v| self.vreg_to_physical(v));
+                self.emit(Instruction::CallIndirect {
+                    dst: dst_reg,
+                    callee: callee_reg,
+                    arg_base,
+                    arg_count: args.len() as u8,
+                });
+            }
+            Inst::MakeClosure {
+                dst,
+                func,
+                captures,
+            } => {
+                // Load captures into consecutive registers
+                let capture_base = self.alloc_consecutive_regs(captures.len());
+                for (i, cap) in captures.iter().enumerate() {
+                    let r = Reg(capture_base.0 + i as u32);
+                    self.load_operand_to(cap, r);
+                }
+
+                let dst_reg = self.vreg_to_physical(*dst);
+                self.emit(Instruction::MakeClosure {
+                    dst: dst_reg,
+                    func_idx: func_id_to_idx(*func),
+                    capture_base,
+                    capture_count: captures.len() as u8,
+                });
+            }
+            Inst::LoadCapture { dst, index } => {
+                let dst_reg = self.vreg_to_physical(*dst);
+                self.emit(Instruction::LoadCapture {
+                    dst: dst_reg,
+                    index: *index as u8,
+                });
+            }
+            Inst::StoreCapture { index, src } => {
+                let src_reg = self.load_operand(src);
+                self.emit(Instruction::StoreCapture {
+                    index: *index as u8,
+                    src: src_reg,
+                });
+            }
+            Inst::Echo { src } => {
+                let src_reg = self.load_operand(src);
+                self.emit(Instruction::Echo { src: src_reg });
             }
         }
     }
@@ -393,14 +486,39 @@ impl Compiler {
         }
     }
 
+    fn load_operand_to(&mut self, op: &Operand, dst: Reg) {
+        match op {
+            Operand::VReg(v) => {
+                let src = self.vreg_to_physical(*v);
+                if src != dst {
+                    self.emit(Instruction::Move { dst, src });
+                }
+            }
+            Operand::IntConst(n) => {
+                self.emit(Instruction::LoadInt { dst, value: *n });
+            }
+            Operand::FloatConst(f) => {
+                let idx = self.chunk.constants.add_float(*f);
+                self.emit(Instruction::LoadConst { dst, idx });
+            }
+            Operand::BoolConst(b) => {
+                self.emit(Instruction::LoadBool { dst, value: *b });
+            }
+            Operand::StringConst(s) => {
+                let idx = self.chunk.constants.add_string(s.clone());
+                self.emit(Instruction::LoadConst { dst, idx });
+            }
+        }
+    }
+
     fn load_binary_operands(&mut self, lhs: &Operand, rhs: &Operand) -> (Reg, Reg) {
         let lhs_reg = self.load_operand(lhs);
         let rhs_reg = self.load_operand(rhs);
         (lhs_reg, rhs_reg)
     }
 
-    fn finish(self) -> CompiledModule {
-        CompiledModule { main: self.chunk }
+    fn into_chunk(self) -> Chunk {
+        self.chunk
     }
 }
 
@@ -408,14 +526,18 @@ fn local_to_slot(local: LocalId) -> LocalSlot {
     LocalSlot(local.0)
 }
 
+fn func_id_to_idx(func: FuncId) -> FuncIdx {
+    FuncIdx(func.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mir::{Block, BlockId, Function, Inst, Operand};
+    use mir::{Block, BlockId, FuncId, Function, Inst, Operand};
 
     #[test]
     fn test_compile_simple() {
-        let mut func = Function::new(None);
+        let mut func = Function::new(FuncId(0), Some("main".to_string()));
         let mut block = Block::new(BlockId(0));
         block.push(Inst::AddInt {
             dst: VReg(0),
@@ -426,9 +548,12 @@ mod tests {
         func.blocks.push(block);
         func.vreg_count = 1;
 
-        let module = Module { main: func };
+        let module = Module {
+            functions: vec![func],
+            main_id: FuncId(0),
+        };
         let compiled = compile(&module);
 
-        assert!(!compiled.main.instructions.is_empty());
+        assert!(!compiled.main().instructions.is_empty());
     }
 }

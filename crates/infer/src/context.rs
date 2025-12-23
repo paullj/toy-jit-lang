@@ -26,6 +26,8 @@ pub(crate) struct InferCtx<'a> {
     next_var: u32,
     expr_types: ArenaMap<ExprIdx, Type>,
     diagnostics: Vec<InferDiagnostic>,
+    /// Expected return type for the current function (for return statement inference)
+    expected_return: Option<Type>,
 }
 
 impl<'a> InferCtx<'a> {
@@ -37,6 +39,7 @@ impl<'a> InferCtx<'a> {
             next_var: 0,
             expr_types: ArenaMap::default(),
             diagnostics: Vec::new(),
+            expected_return: None,
         }
     }
 
@@ -48,6 +51,7 @@ impl<'a> InferCtx<'a> {
             next_var,
             expr_types: ArenaMap::default(),
             diagnostics: Vec::new(),
+            expected_return: None,
         }
     }
 
@@ -55,6 +59,121 @@ impl<'a> InferCtx<'a> {
         let v = TypeVar::new(self.next_var);
         self.next_var += 1;
         v
+    }
+
+    /// Parse a type name string into a Type
+    fn parse_type_name(&self, name: &str) -> Type {
+        match name {
+            "int" => Type::Integer,
+            "float" => Type::Float,
+            "bool" => Type::Boolean,
+            "string" => Type::String,
+            "unit" => Type::Unit,
+            _ => Type::Error, // Unknown type name
+        }
+    }
+
+    /// Infer the type of a function definition
+    fn infer_function(
+        &mut self,
+        name: Option<&str>,
+        params: &[hir::FunctionParam],
+        body: ExprIdx,
+        span: TextRange,
+    ) -> Type {
+        self.env.push_scope();
+
+        // Create fresh type vars for params without annotations
+        let param_types: Vec<Type> = params
+            .iter()
+            .map(|p| {
+                let ty = match &p.ty {
+                    Some(name) => self.parse_type_name(name),
+                    None => Type::Var(self.fresh_var()),
+                };
+
+                // Check default value matches param type
+                if let Some(default_idx) = p.default {
+                    let (default_ty, default_span) = self.infer_expr_idx(default_idx);
+                    self.unify_or_error(&ty, &default_ty, default_span);
+                }
+
+                // Bind param in scope (monomorphic)
+                self.env.insert(p.name.clone(), Scheme::mono(ty.clone()));
+                ty
+            })
+            .collect();
+
+        // Create return type var
+        let ret_var = Type::Var(self.fresh_var());
+
+        // Build function type
+        let fn_type = Type::Function {
+            params: param_types,
+            ret: Box::new(ret_var.clone()),
+        };
+
+        // Pre-bind function name for recursion
+        if let Some(n) = name {
+            self.env
+                .insert(n.to_string(), Scheme::mono(fn_type.clone()));
+        }
+
+        // Set expected return type for return statements
+        let old_expected = self.expected_return.take();
+        self.expected_return = Some(ret_var.clone());
+
+        // Infer body
+        let (body_ty, _) = self.infer_expr_idx(body);
+
+        // Restore old expected return
+        self.expected_return = old_expected;
+
+        // Unify body type with return type
+        self.unify_or_error(&ret_var, &body_ty, span);
+
+        self.env.pop_scope();
+
+        // Apply substitution and return final type
+        self.subst.apply(&fn_type)
+    }
+
+    /// Infer the type of a function call
+    fn infer_call(&mut self, callee: ExprIdx, args: &[ExprIdx], _span: TextRange) -> Type {
+        let (callee_ty, callee_span) = self.infer_expr_idx(callee);
+
+        // Infer argument types
+        let arg_types: Vec<(Type, TextRange)> =
+            args.iter().map(|idx| self.infer_expr_idx(*idx)).collect();
+
+        // Create expected function type with fresh return var
+        let ret_var = Type::Var(self.fresh_var());
+        let expected_fn = Type::Function {
+            params: arg_types.iter().map(|(ty, _)| ty.clone()).collect(),
+            ret: Box::new(ret_var.clone()),
+        };
+
+        // Unify callee with expected function type
+        self.unify_or_error(&callee_ty, &expected_fn, callee_span);
+
+        // Return the (now-constrained) return type
+        self.subst.apply(&ret_var)
+    }
+
+    /// Infer the type of a return statement
+    fn infer_return(&mut self, value: Option<ExprIdx>, span: TextRange) -> Type {
+        let ret_ty = match value {
+            Some(idx) => self.infer_expr_idx(idx).0,
+            None => Type::Unit,
+        };
+
+        // If we're tracking expected return type, unify
+        if let Some(expected) = &self.expected_return.clone() {
+            self.unify_or_error(expected, &ret_ty, span);
+        }
+
+        // Return statement itself has type Unit (control flow)
+        Type::Unit
     }
 
     pub(crate) fn infer_items(mut self) -> InferenceResult {
@@ -80,6 +199,28 @@ impl<'a> InferCtx<'a> {
                 // Apply current substitution before generalizing
                 let ty = self.subst.apply(&ty);
                 let scheme = Scheme::generalize(&self.env, &ty);
+                self.env.insert(name.clone(), scheme);
+            }
+            Item::Definition(Definition::Function {
+                name,
+                params,
+                return_type,
+                body,
+            }) => {
+                let fn_ty = self.infer_function(Some(name), params, *body, span);
+
+                // Check explicit return annotation if present
+                if let Some(ret_name) = return_type {
+                    let annotated_ret = self.parse_type_name(ret_name);
+                    if let Type::Function { ret, .. } = &fn_ty {
+                        self.unify_or_error(&annotated_ret, ret, span);
+                    }
+                }
+
+                // Apply substitution before generalizing
+                let fn_ty = self.subst.apply(&fn_ty);
+                // Generalize and store in env (for polymorphism)
+                let scheme = Scheme::generalize(&self.env, &fn_ty);
                 self.env.insert(name.clone(), scheme);
             }
             Item::Assignment { name, value } => {
@@ -128,6 +269,30 @@ impl<'a> InferCtx<'a> {
                 then_branch,
                 else_branch,
             } => self.infer_if(*condition, *then_branch, *else_branch),
+            Expression::Function {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
+                let fn_ty = self.infer_function(None, params, *body, span);
+
+                // Check explicit return annotation if present
+                if let Some(ret_name) = return_type {
+                    let annotated_ret = self.parse_type_name(ret_name);
+                    if let Type::Function { ret, .. } = &fn_ty {
+                        self.unify_or_error(&annotated_ret, ret, span);
+                    }
+                }
+
+                fn_ty
+            }
+            Expression::Call { callee, args } => self.infer_call(*callee, args, span),
+            Expression::Return { value } => self.infer_return(*value, span),
+            Expression::Echo { value } => {
+                self.infer_expr_idx(*value);
+                Type::Unit
+            }
         }
     }
 
@@ -248,6 +413,15 @@ impl<'a> InferCtx<'a> {
                 }
                 BlockItem::Expression(idx) => {
                     self.infer_expr_idx(*idx);
+                }
+                BlockItem::Return { value } => {
+                    let span = value
+                        .map(|idx| self.hir.expr_spans.get(idx).copied().unwrap_or_default())
+                        .unwrap_or_default();
+                    self.infer_return(*value, span);
+                }
+                BlockItem::Echo { value } => {
+                    self.infer_expr_idx(*value);
                 }
             }
         }

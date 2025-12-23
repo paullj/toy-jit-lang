@@ -158,7 +158,7 @@ impl ReplApp {
         };
 
         let func_ptr = jit
-            .compile(&mir.main, jit_ret_type)
+            .compile(mir.main(), jit_ret_type)
             .map_err(|e| format!("JIT error: {:?}", e))?;
 
         // Execute and format result
@@ -170,6 +170,9 @@ impl ReplApp {
                 hir::Item::Expression(_) => Some(result),
                 hir::Item::Definition(hir::Definition::Variable { name, .. }) => {
                     Some(format!("{} = {}", name, result))
+                }
+                hir::Item::Definition(hir::Definition::Function { name, .. }) => {
+                    Some(format!("{} = <function>", name))
                 }
                 hir::Item::Assignment { name, .. } => Some(format!("{} = {}", name, result)),
             }
@@ -243,6 +246,7 @@ fn get_item_type(item: &hir::Item, infer: &infer::InferenceResult) -> infer::Typ
             .get(name)
             .cloned()
             .unwrap_or(infer::Type::Integer),
+        hir::Item::Definition(hir::Definition::Function { .. }) => infer::Type::Unit,
         hir::Item::Assignment { name, .. } => infer
             .variable_types
             .get(name)
@@ -302,6 +306,10 @@ fn get_expr_type(expr: &hir::Expression, infer: &infer::InferenceResult) -> infe
                 .unwrap_or(infer::Type::Unit),
             None => infer::Type::Unit,
         },
+        hir::Expression::Function { .. } => infer::Type::Unit,
+        hir::Expression::Call { .. } => infer::Type::Unit,
+        hir::Expression::Return { .. } => infer::Type::Unit,
+        hir::Expression::Echo { .. } => infer::Type::Unit,
     }
 }
 

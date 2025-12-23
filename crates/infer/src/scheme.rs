@@ -14,7 +14,6 @@ pub struct Scheme {
 
 impl Scheme {
     /// Create a monomorphic scheme (no quantified vars)
-    #[cfg(test)]
     pub fn mono(ty: Type) -> Self {
         Self {
             quantified: HashSet::new(),

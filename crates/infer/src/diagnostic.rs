@@ -62,4 +62,12 @@ pub enum InferDiagnostic {
         #[label("value too large for type")]
         span: SourceSpan,
     },
+
+    #[error("cannot call non-function type `{ty}`")]
+    #[diagnostic(code(infer::not_callable))]
+    NotCallable {
+        ty: String,
+        #[label("expected function, found `{ty}`")]
+        span: SourceSpan,
+    },
 }

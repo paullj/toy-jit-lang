@@ -91,39 +91,75 @@ impl Runtime {
 
         let result_type = hir.items.last().map(|item| get_item_type(item, inferred));
 
-        let jit_ret_type = match result_type {
-            Some(Type::Float) => jit::ReturnType::Float,
-            Some(Type::Boolean) => jit::ReturnType::Boolean,
-            _ => jit::ReturnType::Integer,
-        };
+        // Use new multi-function compilation if there are multiple functions
+        if mir_module.functions.len() > 1 {
+            jit_compiler.compile_module(mir_module)?;
 
-        let ptr = jit_compiler.compile(&mir_module.main, jit_ret_type)?;
+            let ptr = jit_compiler
+                .get_main(mir_module.main_id)
+                .expect("Main function not compiled");
 
-        let value = match result_type {
-            Some(Type::Float) => {
-                let result: f64 = unsafe {
-                    let func: fn() -> f64 = std::mem::transmute(ptr);
-                    func()
-                };
-                Value::Float(result)
-            }
-            Some(Type::Boolean) => {
-                let result: i64 = unsafe {
-                    let func: fn() -> i64 = std::mem::transmute(ptr);
-                    func()
-                };
-                Value::Bool(result != 0)
-            }
-            _ => {
-                let result: i64 = unsafe {
-                    let func: fn() -> i64 = std::mem::transmute(ptr);
-                    func()
-                };
-                Value::Int(result)
-            }
-        };
+            let value = match result_type {
+                Some(Type::Float) => {
+                    let result: f64 = unsafe {
+                        let func: fn() -> f64 = std::mem::transmute(ptr);
+                        func()
+                    };
+                    Value::Float(result)
+                }
+                Some(Type::Boolean) => {
+                    let result: i64 = unsafe {
+                        let func: fn() -> i64 = std::mem::transmute(ptr);
+                        func()
+                    };
+                    Value::Bool(result != 0)
+                }
+                _ => {
+                    let result: i64 = unsafe {
+                        let func: fn() -> i64 = std::mem::transmute(ptr);
+                        func()
+                    };
+                    Value::Int(result)
+                }
+            };
 
-        Ok(value)
+            Ok(value)
+        } else {
+            // Legacy single-function path for backwards compatibility
+            let jit_ret_type = match result_type {
+                Some(Type::Float) => jit::ReturnType::Float,
+                Some(Type::Boolean) => jit::ReturnType::Boolean,
+                _ => jit::ReturnType::Integer,
+            };
+
+            let ptr = jit_compiler.compile(mir_module.main(), jit_ret_type)?;
+
+            let value = match result_type {
+                Some(Type::Float) => {
+                    let result: f64 = unsafe {
+                        let func: fn() -> f64 = std::mem::transmute(ptr);
+                        func()
+                    };
+                    Value::Float(result)
+                }
+                Some(Type::Boolean) => {
+                    let result: i64 = unsafe {
+                        let func: fn() -> i64 = std::mem::transmute(ptr);
+                        func()
+                    };
+                    Value::Bool(result != 0)
+                }
+                _ => {
+                    let result: i64 = unsafe {
+                        let func: fn() -> i64 = std::mem::transmute(ptr);
+                        func()
+                    };
+                    Value::Int(result)
+                }
+            };
+
+            Ok(value)
+        }
     }
 
     fn execute_tiered(
@@ -163,6 +199,8 @@ fn get_item_type(item: &Item, inferred: &InferenceResult) -> Type {
             .get_variable_type(name)
             .cloned()
             .unwrap_or(Type::Integer),
+        // TODO: Full function types in 02-functions-type-inference.md
+        Item::Definition(Definition::Function { .. }) => Type::Unit,
         Item::Assignment { name, .. } => inferred
             .get_variable_type(name)
             .cloned()
@@ -231,5 +269,10 @@ fn get_expr_type(expr: &Expression, inferred: &InferenceResult) -> Type {
                 None => Type::Unit,
             }
         }
+        // TODO: Full function types in 02-functions-type-inference.md
+        Expression::Function { .. } => Type::Unit,
+        Expression::Call { .. } => Type::Unit,
+        Expression::Return { .. } => Type::Unit,
+        Expression::Echo { .. } => Type::Unit,
     }
 }

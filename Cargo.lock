@@ -982,9 +982,11 @@ dependencies = [
 name = "infer"
 version = "0.1.0"
 dependencies = [
+ "ast",
  "hir",
  "la-arena",
  "miette",
+ "parse",
  "thiserror",
 ]
 

@@ -1,6 +1,6 @@
 use crate::{
-    BlockItem, Definition, ExprIdx, Expression, HirDiagnostic, InfixOp, Item, Literal, PrefixOp,
-    SymbolKind, SymbolTable,
+    BlockItem, Definition, ExprIdx, Expression, FunctionParam, HirDiagnostic, InfixOp, Item,
+    Literal, PrefixOp, SymbolKind, SymbolTable,
 };
 use ast::AstNode;
 use la_arena::{Arena, ArenaMap};
@@ -138,6 +138,37 @@ pub fn lower(root: ast::Root) -> LowerResult {
 
 fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
     match ast {
+        ast::Item::FunctionDefinition(fn_def) => {
+            let name_token = fn_def.name()?;
+            let name = name_token.text().to_string();
+            let def_span = fn_def.syntax().text_range();
+            let name_span = name_token.text_range();
+            let doc_comment = extract_doc_comment(fn_def.syntax());
+            ctx.define_symbol(name.clone(), def_span, name_span, doc_comment);
+
+            let params = lower_params(ctx, fn_def.params());
+            let return_type = fn_def
+                .return_type()
+                .and_then(|t| t.type_token())
+                .map(|t| t.text().to_string());
+
+            let body_ast = fn_def.body();
+            let body_span = body_ast
+                .as_ref()
+                .map(|b| b.syntax().text_range())
+                .unwrap_or_default();
+            let body = body_ast
+                .map(|b| lower_block(ctx, b))
+                .unwrap_or(Expression::Missing);
+            let body_idx = ctx.alloc(body, body_span);
+
+            Some(Item::Definition(Definition::Function {
+                name,
+                params,
+                return_type,
+                body: body_idx,
+            }))
+        }
         ast::Item::VariableDefinition(def) => {
             let name_token = def.name()?;
             let name = name_token.text().to_string();
@@ -157,11 +188,53 @@ fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
             let value = lower_expression(ctx, asgn.value());
             Some(Item::Assignment { name, value })
         }
+        ast::Item::ReturnStatement(ret) => {
+            let value = ret.value().map(|e| {
+                let span = e.syntax().text_range();
+                let expr = lower_expression(ctx, Some(e));
+                ctx.alloc(expr, span)
+            });
+            Some(Item::Expression(Expression::Return { value }))
+        }
+        ast::Item::EchoStatement(echo) => {
+            let value = echo.value().map(|e| {
+                let span = e.syntax().text_range();
+                let expr = lower_expression(ctx, Some(e));
+                ctx.alloc(expr, span)
+            });
+            // If no value, use Missing expression
+            let value_idx =
+                value.unwrap_or_else(|| ctx.alloc(Expression::Missing, Default::default()));
+            Some(Item::Expression(Expression::Echo { value: value_idx }))
+        }
         ast::Item::Expression(expr) => {
             let value = lower_expression(ctx, Some(expr));
             Some(Item::Expression(value))
         }
     }
+}
+
+fn lower_params(ctx: &mut Ctx, params: Option<ast::ParameterList>) -> Vec<FunctionParam> {
+    let Some(param_list) = params else {
+        return vec![];
+    };
+
+    param_list
+        .params()
+        .filter_map(|param| {
+            let name = param.name()?.text().to_string();
+            let ty = param
+                .type_annotation()
+                .and_then(|t| t.type_token())
+                .map(|t| t.text().to_string());
+            let default = param.default_value().map(|e| {
+                let span = e.syntax().text_range();
+                let expr = lower_expression(ctx, Some(e));
+                ctx.alloc(expr, span)
+            });
+            Some(FunctionParam { name, ty, default })
+        })
+        .collect()
 }
 
 fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
@@ -186,7 +259,55 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
         }
         ast::Expression::Block(block) => lower_block(ctx, block),
         ast::Expression::If(if_expr) => lower_if(ctx, if_expr),
+        ast::Expression::Function(fn_expr) => lower_function_expr(ctx, fn_expr),
+        ast::Expression::Call(call) => lower_call(ctx, call),
     }
+}
+
+fn lower_function_expr(ctx: &mut Ctx, fn_expr: ast::FunctionExpression) -> Expression {
+    let params = lower_params(ctx, fn_expr.params());
+    let return_type = fn_expr
+        .return_type()
+        .and_then(|t| t.type_token())
+        .map(|t| t.text().to_string());
+
+    let body_ast = fn_expr.body();
+    let body_span = body_ast
+        .as_ref()
+        .map(|b| b.syntax().text_range())
+        .unwrap_or_default();
+    let body = body_ast
+        .map(|b| lower_block(ctx, b))
+        .unwrap_or(Expression::Missing);
+    let body_idx = ctx.alloc(body, body_span);
+
+    Expression::Function {
+        params,
+        return_type,
+        body: body_idx,
+        captures: vec![], // Filled later during capture analysis
+    }
+}
+
+fn lower_call(ctx: &mut Ctx, call: ast::CallExpression) -> Expression {
+    let callee_ast = call.callee();
+    let callee_span = callee_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let callee_expr = lower_expression(ctx, callee_ast);
+    let callee = ctx.alloc(callee_expr, callee_span);
+
+    let args: Vec<ExprIdx> = call
+        .args()
+        .map(|a| {
+            let span = a.syntax().text_range();
+            let expr = lower_expression(ctx, Some(a));
+            ctx.alloc(expr, span)
+        })
+        .collect();
+
+    Expression::Call { callee, args }
 }
 
 fn lower_infix(ctx: &mut Ctx, ast: ast::InfixExpression) -> Expression {
@@ -362,6 +483,44 @@ fn lower_if(ctx: &mut Ctx, ast: ast::IfExpression) -> Expression {
 
 fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
     match ast {
+        ast::Item::FunctionDefinition(fn_def) => {
+            // Functions inside blocks are treated as local definitions
+            let name_token = fn_def.name()?;
+            let name = name_token.text().to_string();
+            let def_span = fn_def.syntax().text_range();
+            let name_span = name_token.text_range();
+            let doc_comment = extract_doc_comment(fn_def.syntax());
+            ctx.define_symbol(name.clone(), def_span, name_span, doc_comment);
+
+            let params = lower_params(ctx, fn_def.params());
+            let return_type = fn_def
+                .return_type()
+                .and_then(|t| t.type_token())
+                .map(|t| t.text().to_string());
+
+            let body_ast = fn_def.body();
+            let body_span = body_ast
+                .as_ref()
+                .map(|b| b.syntax().text_range())
+                .unwrap_or_default();
+            let body = body_ast
+                .map(|b| lower_block(ctx, b))
+                .unwrap_or(Expression::Missing);
+            let body_idx = ctx.alloc(body, body_span);
+
+            // Lower as function expression assigned to the name
+            let func_expr = Expression::Function {
+                params,
+                return_type,
+                body: body_idx,
+                captures: vec![],
+            };
+            let func_idx = ctx.alloc(func_expr, def_span);
+            Some(BlockItem::Definition {
+                name,
+                value: func_idx,
+            })
+        }
         ast::Item::VariableDefinition(def) => {
             let name_token = def.name()?;
             let name = name_token.text().to_string();
@@ -395,6 +554,25 @@ fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
                 name,
                 value: value_idx,
             })
+        }
+        ast::Item::ReturnStatement(ret) => {
+            let value = ret.value().map(|e| {
+                let span = e.syntax().text_range();
+                let expr = lower_expression(ctx, Some(e));
+                ctx.alloc(expr, span)
+            });
+            Some(BlockItem::Return { value })
+        }
+        ast::Item::EchoStatement(echo) => {
+            let value = echo.value().map(|e| {
+                let span = e.syntax().text_range();
+                let expr = lower_expression(ctx, Some(e));
+                ctx.alloc(expr, span)
+            });
+            // If no value, use Missing expression
+            let value_idx =
+                value.unwrap_or_else(|| ctx.alloc(Expression::Missing, Default::default()));
+            Some(BlockItem::Echo { value: value_idx })
         }
         ast::Item::Expression(expr) => {
             let span = expr.syntax().text_range();
@@ -854,5 +1032,99 @@ mod tests {
         let result = lower_src("# This is a regular comment\nx := 42");
         let symbol = result.symbols.get("x").unwrap();
         assert_eq!(symbol.doc_comment, None);
+    }
+
+    // === Functions ===
+
+    #[test]
+    fn lower_function_definition() {
+        let result = lower_src("fn add(a, b) { a + b }");
+        assert_eq!(result.items.len(), 1);
+        let Item::Definition(Definition::Function {
+            name, params, body, ..
+        }) = &result.items[0]
+        else {
+            panic!("expected function definition");
+        };
+        assert_eq!(name, "add");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].name, "a");
+        assert_eq!(params[1].name, "b");
+
+        let body_expr = &result.expressions[*body];
+        assert!(matches!(body_expr, Expression::Block { .. }));
+    }
+
+    #[test]
+    fn lower_function_with_return_type() {
+        let result = lower_src("fn double(x): int { x * 2 }");
+        let Item::Definition(Definition::Function {
+            name, return_type, ..
+        }) = &result.items[0]
+        else {
+            panic!("expected function definition");
+        };
+        assert_eq!(name, "double");
+        assert_eq!(return_type.as_deref(), Some("int"));
+    }
+
+    #[test]
+    fn lower_lambda_expression() {
+        let result = lower_src("inc := fn(x) { x + 1 }");
+        let Item::Definition(Definition::Variable { name, value }) = &result.items[0] else {
+            panic!("expected variable definition");
+        };
+        assert_eq!(name, "inc");
+        assert!(matches!(value, Expression::Function { .. }));
+    }
+
+    #[test]
+    fn lower_call_expression() {
+        let result = lower_src("x := add(1, 2)");
+        let Item::Definition(Definition::Variable { value, .. }) = &result.items[0] else {
+            panic!("expected variable definition");
+        };
+        let Expression::Call { callee, args } = value else {
+            panic!("expected call expression");
+        };
+        let callee_expr = &result.expressions[*callee];
+        assert!(matches!(callee_expr, Expression::VariableRef { name } if name == "add"));
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn lower_return_statement() {
+        let result = lower_src("fn foo() { return 42 }");
+        let Item::Definition(Definition::Function { body, .. }) = &result.items[0] else {
+            panic!("expected function definition");
+        };
+        let Expression::Block { items, .. } = &result.expressions[*body] else {
+            panic!("expected block");
+        };
+        assert_eq!(items.len(), 1);
+        assert!(matches!(&items[0], BlockItem::Return { value: Some(_) }));
+    }
+
+    #[test]
+    fn lower_return_without_value() {
+        let result = lower_src("fn foo() { return }");
+        let Item::Definition(Definition::Function { body, .. }) = &result.items[0] else {
+            panic!("expected function definition");
+        };
+        let Expression::Block { items, .. } = &result.expressions[*body] else {
+            panic!("expected block");
+        };
+        assert!(matches!(&items[0], BlockItem::Return { value: None }));
+    }
+
+    #[test]
+    fn lower_function_with_default_param() {
+        let result = lower_src("fn greet(name = \"World\") { name }");
+        let Item::Definition(Definition::Function { params, .. }) = &result.items[0] else {
+            panic!("expected function definition");
+        };
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "name");
+        assert!(params[0].default.is_some());
     }
 }

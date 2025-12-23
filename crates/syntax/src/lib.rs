@@ -61,6 +61,9 @@ pub enum SyntaxKind {
     FalseKeyword,
     IfKeyword,
     ElseKeyword,
+    FnKeyword,
+    ReturnKeyword,
+    EchoKeyword,
 
     // Tokens - Literals
     Identifier,
@@ -85,6 +88,13 @@ pub enum SyntaxKind {
     TypeAnnotation,
     BlockExpression,
     IfExpression,
+    FunctionDefinition,
+    FunctionExpression,
+    ParameterList,
+    Parameter,
+    CallExpression,
+    ReturnStatement,
+    EchoStatement,
 }
 
 impl SyntaxKind {
@@ -154,6 +164,9 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::False => SyntaxKind::FalseKeyword,
             TokenKind::If => SyntaxKind::IfKeyword,
             TokenKind::Else => SyntaxKind::ElseKeyword,
+            TokenKind::Fn => SyntaxKind::FnKeyword,
+            TokenKind::Return => SyntaxKind::ReturnKeyword,
+            TokenKind::Echo => SyntaxKind::EchoKeyword,
 
             // Literals
             TokenKind::Identifier => SyntaxKind::Identifier,

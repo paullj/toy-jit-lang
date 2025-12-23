@@ -15,16 +15,22 @@ impl Root {
 
 #[derive(Debug)]
 pub enum Item {
+    FunctionDefinition(FunctionDefinition),
     VariableDefinition(VariableDefinition),
     VariableAssignment(VariableAssignment),
+    ReturnStatement(ReturnStatement),
+    EchoStatement(EchoStatement),
     Expression(Expression),
 }
 
 impl Item {
     pub fn cast(node: SyntaxNode) -> Option<Item> {
         let result = match node.kind() {
+            SyntaxKind::FunctionDefinition => Self::FunctionDefinition(FunctionDefinition(node)),
             SyntaxKind::VariableDefinition => Self::VariableDefinition(VariableDefinition(node)),
             SyntaxKind::VariableAssignment => Self::VariableAssignment(VariableAssignment(node)),
+            SyntaxKind::ReturnStatement => Self::ReturnStatement(ReturnStatement(node)),
+            SyntaxKind::EchoStatement => Self::EchoStatement(EchoStatement(node)),
             _ => Self::Expression(Expression::cast(node)?),
         };
         Some(result)
@@ -32,8 +38,11 @@ impl Item {
 
     pub fn syntax(&self) -> &SyntaxNode {
         match self {
+            Item::FunctionDefinition(n) => n.syntax(),
             Item::VariableDefinition(n) => n.syntax(),
             Item::VariableAssignment(n) => n.syntax(),
+            Item::ReturnStatement(n) => n.syntax(),
+            Item::EchoStatement(n) => n.syntax(),
             Item::Expression(e) => e.syntax(),
         }
     }
@@ -78,6 +87,8 @@ pub enum Expression {
     VariableReference(VariableReference),
     Block(BlockExpression),
     If(IfExpression),
+    Function(FunctionExpression),
+    Call(CallExpression),
 }
 
 impl Expression {
@@ -90,6 +101,8 @@ impl Expression {
             SyntaxKind::VariableReference => Self::VariableReference(VariableReference(node)),
             SyntaxKind::BlockExpression => Self::Block(BlockExpression(node)),
             SyntaxKind::IfExpression => Self::If(IfExpression(node)),
+            SyntaxKind::FunctionExpression => Self::Function(FunctionExpression(node)),
+            SyntaxKind::CallExpression => Self::Call(CallExpression(node)),
             _ => return None,
         };
         Some(result)
@@ -104,6 +117,8 @@ impl Expression {
             Expression::VariableReference(n) => n.syntax(),
             Expression::Block(n) => n.syntax(),
             Expression::If(n) => n.syntax(),
+            Expression::Function(n) => n.syntax(),
+            Expression::Call(n) => n.syntax(),
         }
     }
 }
@@ -384,6 +399,100 @@ impl ElseBranch {
             ElseBranch::Block(b) => b.syntax(),
             ElseBranch::ElseIf(i) => i.syntax(),
         }
+    }
+}
+
+ast_node!(FunctionDefinition, SyntaxKind::FunctionDefinition);
+
+impl FunctionDefinition {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+
+    pub fn params(&self) -> Option<ParameterList> {
+        self.0.children().find_map(ParameterList::cast)
+    }
+
+    pub fn return_type(&self) -> Option<TypeAnnotation> {
+        self.0.children().find_map(TypeAnnotation::cast)
+    }
+
+    pub fn body(&self) -> Option<BlockExpression> {
+        self.0.children().find_map(BlockExpression::cast)
+    }
+}
+
+ast_node!(FunctionExpression, SyntaxKind::FunctionExpression);
+
+impl FunctionExpression {
+    pub fn params(&self) -> Option<ParameterList> {
+        self.0.children().find_map(ParameterList::cast)
+    }
+
+    pub fn return_type(&self) -> Option<TypeAnnotation> {
+        self.0.children().find_map(TypeAnnotation::cast)
+    }
+
+    pub fn body(&self) -> Option<BlockExpression> {
+        self.0.children().find_map(BlockExpression::cast)
+    }
+}
+
+ast_node!(ParameterList, SyntaxKind::ParameterList);
+
+impl ParameterList {
+    pub fn params(&self) -> impl Iterator<Item = Parameter> {
+        self.0.children().filter_map(Parameter::cast)
+    }
+}
+
+ast_node!(Parameter, SyntaxKind::Parameter);
+
+impl Parameter {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+
+    pub fn type_annotation(&self) -> Option<TypeAnnotation> {
+        self.0.children().find_map(TypeAnnotation::cast)
+    }
+
+    pub fn default_value(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+}
+
+ast_node!(CallExpression, SyntaxKind::CallExpression);
+
+impl CallExpression {
+    pub fn callee(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    pub fn args(&self) -> impl Iterator<Item = Expression> {
+        self.0.children().filter_map(Expression::cast).skip(1)
+    }
+}
+
+ast_node!(ReturnStatement, SyntaxKind::ReturnStatement);
+
+impl ReturnStatement {
+    pub fn value(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+}
+
+ast_node!(EchoStatement, SyntaxKind::EchoStatement);
+
+impl EchoStatement {
+    pub fn value(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
     }
 }
 

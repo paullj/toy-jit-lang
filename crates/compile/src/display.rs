@@ -45,6 +45,44 @@ impl fmt::Display for Instruction {
             Instruction::JumpIf { cond, target } => write!(f, "jump.if {} {}", cond, target),
             Instruction::JumpIfNot { cond, target } => write!(f, "jump.ifn {} {}", cond, target),
 
+            Instruction::Call {
+                dst,
+                func_idx,
+                arg_base,
+                arg_count,
+            } => match dst {
+                Some(d) => write!(f, "call {} {} {} {}", d, func_idx, arg_base, arg_count),
+                None => write!(f, "call _ {} {} {}", func_idx, arg_base, arg_count),
+            },
+            Instruction::CallIndirect {
+                dst,
+                callee,
+                arg_base,
+                arg_count,
+            } => match dst {
+                Some(d) => write!(f, "call.i {} {} {} {}", d, callee, arg_base, arg_count),
+                None => write!(f, "call.i _ {} {} {}", callee, arg_base, arg_count),
+            },
+            Instruction::Return { src } => match src {
+                Some(r) => write!(f, "ret {}", r),
+                None => write!(f, "ret"),
+            },
+
+            Instruction::MakeClosure {
+                dst,
+                func_idx,
+                capture_base,
+                capture_count,
+            } => write!(
+                f,
+                "closure {} {} {} {}",
+                dst, func_idx, capture_base, capture_count
+            ),
+            Instruction::LoadCapture { dst, index } => write!(f, "load.cap {} {}", dst, index),
+            Instruction::StoreCapture { index, src } => write!(f, "store.cap {} {}", index, src),
+
+            Instruction::Echo { src } => write!(f, "echo {}", src),
+
             Instruction::Halt => write!(f, "halt"),
         }
     }
@@ -54,8 +92,8 @@ impl fmt::Display for Chunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "; locals: {}, registers: {}",
-            self.local_count, self.register_count
+            "; params: {}, locals: {}, registers: {}",
+            self.param_count, self.local_count, self.register_count
         )?;
 
         if !self.constants.is_empty() {
@@ -75,7 +113,17 @@ impl fmt::Display for Chunk {
 
 impl fmt::Display for CompiledModule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "=== main ===")?;
-        write!(f, "{}", self.main)
+        for (i, chunk) in self.chunks.iter().enumerate() {
+            if i == self.main_idx {
+                writeln!(f, "=== fn{} (main) ===", i)?;
+            } else {
+                writeln!(f, "=== fn{} ===", i)?;
+            }
+            write!(f, "{}", chunk)?;
+            if i < self.chunks.len() - 1 {
+                writeln!(f)?;
+            }
+        }
+        Ok(())
     }
 }
