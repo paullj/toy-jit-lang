@@ -1,0 +1,136 @@
+name: benchmark
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      # Download previous baseline (if exists)
+      - name: Download baseline
+        uses: actions/cache@v4
+        with:
+          path: benchmarks/baseline.json
+          key: benchmark-baseline-${{ github.base_ref || 'main' }}
+          restore-keys: |
+            benchmark-baseline-main
+
+      # Run benchmarks
+      - name: Run benchmarks
+        run: |
+          cargo build --release
+          cargo run --release -- bench -n 10 --save-baseline benchmarks/current.json
+
+      # Compare with baseline (for PRs)
+      - name: Compare with baseline
+        if: github.event_name == 'pull_request' && hashFiles('benchmarks/baseline.json') != ''
+        run: |
+          cargo run --release -- bench --baseline benchmarks/baseline.json
+
+      # Run criterion benchmarks
+      - name: Criterion benchmarks
+        run: cargo bench --package bench
+
+      # Upload results
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmarks/current.json
+            benchmarks/baseline.json
+            target/criterion/
+
+      # Update baseline on main
+      - name: Update baseline
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          cp benchmarks/current.json benchmarks/baseline.json
+
+      - name: Cache new baseline
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: benchmarks/baseline.json
+          key: benchmark-baseline-main
+
+  # Optional: Comment on PR with results
+  comment-pr:
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results
+
+      - name: Comment benchmark results
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let body = '## Benchmark Results\n\n';
+
+            try {
+              const current = JSON.parse(fs.readFileSync('benchmarks/current.json'));
+              let baseline = null;
+              try {
+                baseline = JSON.parse(fs.readFileSync('benchmarks/baseline.json'));
+              } catch (e) {}
+
+              const formatDiff = (curr, base) => {
+                if (!base) return '';
+                const diff = ((curr - base) / base) * 100;
+                if (Math.abs(diff) < 1) return ' ≈';
+                const arrow = diff > 0 ? '↑' : '↓';
+                const color = diff > 5 ? '🔴' : diff < -5 ? '🟢' : '';
+                return ` ${color}${arrow}${Math.abs(diff).toFixed(0)}%`;
+              };
+
+              body += '| Script | Frontend | VM Total | Δ |\n';
+              body += '|--------|----------|----------|---|\n';
+
+              for (const [name, data] of Object.entries(current)) {
+                const frontend = (data.lex_us + data.parse_us + data.hir_us + data.infer_us) / 1000;
+                const total = data.vm_total_us / 1000;
+                const baseTotal = baseline?.[name]?.vm_total_us / 1000;
+                const diff = formatDiff(total, baseTotal);
+                body += `| ${name} | ${frontend.toFixed(2)}ms | ${total.toFixed(2)}ms | ${diff} |\n`;
+              }
+
+              if (baseline) {
+                body += '\n_Compared to baseline from main_\n';
+              } else {
+                body += '\n_No baseline available for comparison_\n';
+              }
+            } catch (e) {
+              body += '_Could not parse benchmark results_\n';
+            }
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
