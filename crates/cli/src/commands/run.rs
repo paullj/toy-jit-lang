@@ -77,11 +77,11 @@ pub fn process(src: &str, mode: ExecutionMode) -> Result<()> {
     let mir_module = mir::lower(lower, inferred);
 
     let mut runtime = Runtime::new(mode);
-    let result = runtime
+    let (result, heap) = runtime
         .execute(&mir_module, lower, inferred)
         .map_err(|e| miette::miette!("{e}"))?;
 
-    println!("{}", result);
+    println!("{}", result.display(&heap));
 
     Ok(())
 }

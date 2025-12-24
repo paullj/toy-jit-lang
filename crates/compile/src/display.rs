@@ -38,9 +38,6 @@ impl fmt::Display for Instruction {
 
             Instruction::Not { dst, src } => write!(f, "not {} {}", dst, src),
 
-            Instruction::StoreLocal { slot, src } => write!(f, "store {} {}", slot, src),
-            Instruction::LoadLocal { dst, slot } => write!(f, "load {} {}", dst, slot),
-
             Instruction::Jump { target } => write!(f, "jump {}", target),
             Instruction::JumpIf { cond, target } => write!(f, "jump.if {} {}", cond, target),
             Instruction::JumpIfNot { cond, target } => write!(f, "jump.ifn {} {}", cond, target),

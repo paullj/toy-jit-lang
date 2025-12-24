@@ -22,7 +22,7 @@ pub enum ExecutionMode {
 pub struct BenchResult {
     pub timings: PipelineTimings,
     pub code_size: CodeSizeMetrics,
-    pub value: Result<vm::Value, Box<dyn std::error::Error + Send + Sync>>,
+    pub value: Result<(vm::Value, vm::Heap), Box<dyn std::error::Error + Send + Sync>>,
 }
 
 /// Benchmark runner for the toy language pipeline.

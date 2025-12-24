@@ -6,14 +6,14 @@ mod value;
 mod vm;
 
 pub use error::RuntimeError;
-pub use value::{ClosureValue, Value};
+pub use value::{Heap, Value, ValueTag};
 
 use compile::CompiledModule;
 use vm::Vm;
 
-/// Execute a compiled module and return the result.
-pub fn run(module: &CompiledModule) -> Result<Value, RuntimeError> {
-    let mut vm = Vm::new(module);
+/// Execute a compiled module and return the result with the heap.
+pub fn run(module: &CompiledModule) -> Result<(Value, Heap), RuntimeError> {
+    let vm = Vm::new(module);
     vm.execute()
 }
 
@@ -52,8 +52,8 @@ mod tests {
             Some(VReg(0)),
         );
         let compiled = compile(&mir);
-        let result = run(&compiled).unwrap();
-        assert_eq!(result, Value::Int(5));
+        let (result, _) = run(&compiled).unwrap();
+        assert_eq!(result.as_int(), Some(5));
     }
 
     #[test]
@@ -73,8 +73,8 @@ mod tests {
             Some(VReg(0)),
         );
         let compiled = compile(&mir);
-        let result = run(&compiled).unwrap();
-        assert_eq!(result, Value::Int(42));
+        let (result, _) = run(&compiled).unwrap();
+        assert_eq!(result.as_int(), Some(42));
     }
 
     #[test]
@@ -88,8 +88,7 @@ mod tests {
             Some(VReg(0)),
         );
         let compiled = compile(&mir);
-        let result = run(&compiled);
-        assert_eq!(result, Err(RuntimeError::DivisionByZero));
+        assert!(matches!(run(&compiled), Err(RuntimeError::DivisionByZero)));
     }
 
     #[test]
@@ -143,8 +142,8 @@ mod tests {
         };
 
         let compiled = compile(&module);
-        let result = run(&compiled).unwrap();
-        assert_eq!(result, Value::Int(3));
+        let (result, _) = run(&compiled).unwrap();
+        assert_eq!(result.as_int(), Some(3));
     }
 
     #[test]
@@ -225,7 +224,7 @@ mod tests {
         };
 
         let compiled = compile(&module);
-        let result = run(&compiled).unwrap();
-        assert_eq!(result, Value::Int(15));
+        let (result, _) = run(&compiled).unwrap();
+        assert_eq!(result.as_int(), Some(15));
     }
 }

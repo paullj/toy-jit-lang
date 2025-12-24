@@ -1,12 +1,12 @@
 use std::fmt;
 
-/// Physical register
+/// Stack slot index (unified: locals at [0, local_count), temps at [local_count, frame_size))
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Reg(pub u32);
+pub struct Slot(pub u32);
 
-impl fmt::Display for Reg {
+impl fmt::Display for Slot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "r{}", self.0)
+        write!(f, "s{}", self.0)
     }
 }
 
@@ -30,16 +30,6 @@ impl fmt::Display for Label {
     }
 }
 
-/// Local variable slot
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LocalSlot(pub u32);
-
-impl fmt::Display for LocalSlot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "slot{}", self.0)
-    }
-}
-
 /// Function index in compiled module
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FuncIdx(pub u32);
@@ -55,149 +45,139 @@ impl fmt::Display for FuncIdx {
 pub enum Instruction {
     // Loads
     LoadInt {
-        dst: Reg,
+        dst: Slot,
         value: i64,
     },
     LoadBool {
-        dst: Reg,
+        dst: Slot,
         value: bool,
     },
     LoadConst {
-        dst: Reg,
+        dst: Slot,
         idx: ConstIdx,
     },
 
     // Move
     Move {
-        dst: Reg,
-        src: Reg,
+        dst: Slot,
+        src: Slot,
     },
 
     // Integer arithmetic
     AddInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     SubInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     MulInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     DivInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     ModInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     NegInt {
-        dst: Reg,
-        src: Reg,
+        dst: Slot,
+        src: Slot,
     },
 
     // Float arithmetic
     AddFloat {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     SubFloat {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     MulFloat {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     DivFloat {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     NegFloat {
-        dst: Reg,
-        src: Reg,
+        dst: Slot,
+        src: Slot,
     },
 
     // Integer comparisons
     EqInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     NeInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     LtInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     LeInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     GtInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     GeInt {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
 
     // Float comparisons
     LtFloat {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     LeFloat {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     GtFloat {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
     GeFloat {
-        dst: Reg,
-        lhs: Reg,
-        rhs: Reg,
+        dst: Slot,
+        lhs: Slot,
+        rhs: Slot,
     },
 
     // Boolean
     Not {
-        dst: Reg,
-        src: Reg,
-    },
-
-    // Local variables
-    StoreLocal {
-        slot: LocalSlot,
-        src: Reg,
-    },
-    LoadLocal {
-        dst: Reg,
-        slot: LocalSlot,
+        dst: Slot,
+        src: Slot,
     },
 
     // Control flow
@@ -205,57 +185,57 @@ pub enum Instruction {
         target: Label,
     },
     JumpIf {
-        cond: Reg,
+        cond: Slot,
         target: Label,
     },
     JumpIfNot {
-        cond: Reg,
+        cond: Slot,
         target: Label,
     },
 
     // Function calls
     /// Direct call to function at index
     Call {
-        dst: Option<Reg>,
+        dst: Option<Slot>,
         func_idx: FuncIdx,
-        arg_base: Reg,
+        arg_base: Slot,
         arg_count: u8,
     },
     /// Indirect call through closure value
     CallIndirect {
-        dst: Option<Reg>,
-        callee: Reg,
-        arg_base: Reg,
+        dst: Option<Slot>,
+        callee: Slot,
+        arg_base: Slot,
         arg_count: u8,
     },
     /// Return from function
     Return {
-        src: Option<Reg>,
+        src: Option<Slot>,
     },
 
     // Closures
     /// Create closure value
     MakeClosure {
-        dst: Reg,
+        dst: Slot,
         func_idx: FuncIdx,
-        capture_base: Reg,
+        capture_base: Slot,
         capture_count: u8,
     },
     /// Load from closure environment
     LoadCapture {
-        dst: Reg,
+        dst: Slot,
         index: u8,
     },
     /// Store to closure environment
     StoreCapture {
         index: u8,
-        src: Reg,
+        src: Slot,
     },
 
     // I/O
     /// Print value to stdout
     Echo {
-        src: Reg,
+        src: Slot,
     },
 
     // End

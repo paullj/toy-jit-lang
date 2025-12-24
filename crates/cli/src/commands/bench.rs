@@ -91,7 +91,7 @@ impl BenchCmd {
             // Print result
             if let Some(result) = &first_result {
                 match result {
-                    Ok(v) => println!("  result: {}", v),
+                    Ok((v, heap)) => println!("  result: {}", v.display(heap)),
                     Err(e) => println!("  error: {}", e),
                 }
             }
