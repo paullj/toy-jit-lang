@@ -415,6 +415,9 @@ impl<'a> Vm<'a> {
                     capture_base,
                     capture_count,
                 } => {
+                    // GC before allocation (while captures are still on stack as roots)
+                    self.maybe_gc();
+
                     let mut captures = Vec::with_capacity(capture_count as usize);
                     for i in 0..capture_count {
                         let idx = base + capture_base.0 as usize + i as usize;
@@ -473,6 +476,31 @@ impl<'a> Vm<'a> {
             Value::dynamic_string(idx)
         } else {
             value
+        }
+    }
+
+    /// Collect GC roots from VM state.
+    fn gc_roots(&self) -> Vec<Value> {
+        let mut roots = Vec::with_capacity(self.stack.len() + self.frames.len());
+
+        // All stack values are roots
+        roots.extend(self.stack.iter().copied());
+
+        // Closure indices from call frames are roots
+        for frame in &self.frames {
+            if let Some(closure_idx) = frame.closure_idx {
+                roots.push(Value::closure(closure_idx));
+            }
+        }
+
+        roots
+    }
+
+    /// Run GC if threshold exceeded. Call after allocations.
+    fn maybe_gc(&mut self) {
+        if self.heap.should_gc() {
+            let roots = self.gc_roots();
+            self.heap.collect(roots.into_iter());
         }
     }
 

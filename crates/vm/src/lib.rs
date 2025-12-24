@@ -6,7 +6,7 @@ mod value;
 mod vm;
 
 pub use error::RuntimeError;
-pub use value::{Heap, Value, ValueTag};
+pub use value::{GcStats, Heap, Value, ValueTag};
 
 use compile::CompiledModule;
 use vm::Vm;

@@ -45,19 +45,16 @@ toy is a simple programming language that is made for fun.
 * clean up
   * maybe make cli just a cli and move all the logic elsewhere
 
-* functions
-* closures
-
 * control flow
   * loops
     * while
     * for x in y
     * loop
 
-* garbage collection
-  * reference counting?
-  * tracing gc?
-  * hybrid?
+* tiered execution
+  * interpret code first
+  * profile hot paths
+  * jit compile hot paths
 
 * structs
 * tuples
@@ -124,10 +121,8 @@ toy is a simple programming language that is made for fun.
   * should use vm probably
 
 * performance
-  * benchmark suite
-  * compare jit vs vm vs interpreted
-  * optimise mir
-  * optimise jit codegen
-  * optimise vm
   * look at hot paths and jit
-  * use an interner?
+  * optimise memory usage
+  * parallel parsing
+    * do we need cs-tree instead of rowan?
+  * parallel gc?
