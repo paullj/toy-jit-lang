@@ -1,0 +1,11 @@
+fn rec(n, acc) {
+  if n == 0 {
+    acc
+  } else {
+    rec(n - 1, acc + 1)
+  }
+}
+
+result := rec(10, 0)
+echo result
+result

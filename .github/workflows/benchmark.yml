@@ -94,39 +94,90 @@ jobs:
             let body = '## Benchmark Results\n\n';
 
             try {
-              const current = JSON.parse(fs.readFileSync('benchmarks/current.json'));
-              let baseline = null;
+              const currentData = JSON.parse(fs.readFileSync('benchmarks/current.json'));
+              let baselineData = null;
               try {
-                baseline = JSON.parse(fs.readFileSync('benchmarks/baseline.json'));
+                baselineData = JSON.parse(fs.readFileSync('benchmarks/baseline.json'));
               } catch (e) {}
 
-              const formatDiff = (curr, base) => {
-                if (!base) return '';
-                const diff = ((curr - base) / base) * 100;
-                if (Math.abs(diff) < 1) return ' ≈';
-                const arrow = diff > 0 ? '↑' : '↓';
-                const color = diff > 5 ? '🔴' : diff < -5 ? '🟢' : '';
-                return ` ${color}${arrow}${Math.abs(diff).toFixed(0)}%`;
+              const iterations = currentData.iterations || 10;
+              const current = currentData.results || currentData;
+              const baseline = baselineData?.results || baselineData;
+
+              let improvements = 0;
+              let regressions = 0;
+
+              const formatValue = (avg, stddev) => {
+                if (avg === undefined || avg === null) return '-';
+                const sd = stddev || 0;
+                if (avg >= 1000) {
+                  return `${(avg / 1000).toFixed(1)}±${(sd / 1000).toFixed(1)}ms`;
+                }
+                return `${avg}±${sd}µs`;
               };
 
-              body += '| Script | Frontend | VM Total | Δ |\n';
-              body += '|--------|----------|----------|---|\n';
+              const formatCell = (currAvg, currStddev, baseAvg) => {
+                const value = formatValue(currAvg, currStddev);
+                if (!baseAvg || baseAvg === 0) return value;
+
+                const diff = ((currAvg - baseAvg) / baseAvg) * 100;
+                if (Math.abs(diff) < 5) return value;
+
+                if (diff < -5) {
+                  improvements++;
+                  return `${value} 🟢↓${Math.abs(diff).toFixed(0)}%`;
+                } else {
+                  regressions++;
+                  return `${value} 🔴↑${diff.toFixed(0)}%`;
+                }
+              };
+
+              body += `**${iterations} iterations per script**\n\n`;
+
+              // Table 1: Compilation stages
+              body += '### Compilation\n\n';
+              body += '| Script | lex | parse | hir | infer | mir | compile |\n';
+              body += '|--------|-----|-------|-----|-------|-----|--------|\n';
 
               for (const [name, data] of Object.entries(current)) {
-                const frontend = (data.lex_us + data.parse_us + data.hir_us + data.infer_us) / 1000;
-                const total = data.vm_total_us / 1000;
-                const baseTotal = baseline?.[name]?.vm_total_us / 1000;
-                const diff = formatDiff(total, baseTotal);
-                body += `| ${name} | ${frontend.toFixed(2)}ms | ${total.toFixed(2)}ms | ${diff} |\n`;
+                const base = baseline?.[name];
+                body += `| ${name} `;
+                body += `| ${formatCell(data.lex_avg_us, data.lex_stddev_us, base?.lex_avg_us)} `;
+                body += `| ${formatCell(data.parse_avg_us, data.parse_stddev_us, base?.parse_avg_us)} `;
+                body += `| ${formatCell(data.hir_avg_us, data.hir_stddev_us, base?.hir_avg_us)} `;
+                body += `| ${formatCell(data.infer_avg_us, data.infer_stddev_us, base?.infer_avg_us)} `;
+                body += `| ${formatCell(data.mir_avg_us, data.mir_stddev_us, base?.mir_avg_us)} `;
+                body += `| ${formatCell(data.compile_avg_us, data.compile_stddev_us, base?.compile_avg_us)} |\n`;
               }
 
+              // Table 2: Execution
+              body += '\n### Execution\n\n';
+              body += '| Script | vm_exec | vm_total | jit_compile | jit_exec | jit_total |\n';
+              body += '|--------|---------|----------|-------------|----------|----------|\n';
+
+              for (const [name, data] of Object.entries(current)) {
+                const base = baseline?.[name];
+                body += `| ${name} `;
+                body += `| ${formatCell(data.vm_exec_avg_us, data.vm_exec_stddev_us, base?.vm_exec_avg_us)} `;
+                body += `| ${formatCell(data.vm_total_avg_us, null, base?.vm_total_avg_us)} `;
+                body += `| ${formatCell(data.jit_compile_avg_us, data.jit_compile_stddev_us, base?.jit_compile_avg_us)} `;
+                body += `| ${formatCell(data.jit_exec_avg_us, data.jit_exec_stddev_us, base?.jit_exec_avg_us)} `;
+                body += `| ${formatCell(data.jit_total_avg_us, null, base?.jit_total_avg_us)} |\n`;
+              }
+
+              // Summary
+              body += '\n---\n';
               if (baseline) {
-                body += `\n_Compared to baseline from ${context.payload.pull_request?.base?.ref || 'dev'}_\n`;
+                const unchanged = Object.keys(current).length * 10 - improvements - regressions;
+                body += `**Summary:** ${improvements} improvement${improvements !== 1 ? 's' : ''} 🟢, `;
+                body += `${regressions} regression${regressions !== 1 ? 's' : ''} 🔴, `;
+                body += `${unchanged} unchanged\n\n`;
+                body += `_Compared to baseline from ${context.payload.pull_request?.base?.ref || 'dev'}_\n`;
               } else {
-                body += '\n_No baseline available for comparison_\n';
+                body += '_No baseline available for comparison_\n';
               }
             } catch (e) {
-              body += '_Could not parse benchmark results_\n';
+              body += `_Could not parse benchmark results: ${e.message}_\n`;
             }
 
             github.rest.issues.createComment({

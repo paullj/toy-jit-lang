@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 pub use runner::{BenchRunner, ExecutionMode};
-pub use timings::{CodeSizeMetrics, PipelineTimings};
+pub use timings::{CodeSizeMetrics, PipelineStats, PipelineTimings};
 
 /// Load all benchmark scripts from `benchmarks/scripts/`.
 /// Returns Vec of (name, source) sorted by name.
