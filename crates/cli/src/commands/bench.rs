@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::{Args, ValueEnum};
 use miette::Result;
 
-use bench::{BenchRunner, ExecutionMode, PipelineTimings};
+use bench::{BenchRunner, ExecutionMode, PipelineStats};
 
 /// Execution mode for benchmarks.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -71,7 +71,7 @@ impl BenchCmd {
         for (name, source) in &scripts {
             println!("═══ {} ═══", name);
 
-            let mut timings_sum = PipelineTimings::default();
+            let mut samples = Vec::with_capacity(self.iterations);
             let mut first_result = None;
             let mut code_size = None;
 
@@ -83,10 +83,10 @@ impl BenchCmd {
                     code_size = Some(bench_result.code_size);
                 }
 
-                timings_sum = timings_sum.add(&bench_result.timings);
+                samples.push(bench_result.timings);
             }
 
-            let avg = timings_sum.div(self.iterations);
+            let stats = PipelineStats::from_samples(&samples);
 
             // Print result
             if let Some(result) = &first_result {
@@ -96,8 +96,8 @@ impl BenchCmd {
                 }
             }
 
-            // Print timings
-            println!("{}", avg.display());
+            // Print timings (avg)
+            println!("{}", stats.avg.display());
 
             // Print code size
             if let Some(cs) = &code_size {
@@ -105,7 +105,7 @@ impl BenchCmd {
             }
 
             // Print speedup comparison
-            if let (Some(vm), Some(jit)) = (avg.vm_exec, avg.jit_exec) {
+            if let (Some(vm), Some(jit)) = (stats.avg.vm_exec, stats.avg.jit_exec) {
                 let speedup = vm.as_nanos() as f64 / jit.as_nanos() as f64;
                 if speedup > 1.0 {
                     println!("  JIT is {:.1}x faster than VM\n", speedup);
@@ -116,7 +116,7 @@ impl BenchCmd {
                 println!();
             }
 
-            results.push((name.clone(), avg));
+            results.push((name.clone(), stats));
         }
 
         // Compare with baseline if provided
@@ -170,21 +170,20 @@ impl BenchCmd {
         Ok(scripts)
     }
 
-    fn compare_baseline(
-        &self,
-        path: &PathBuf,
-        results: &[(String, PipelineTimings)],
-    ) -> Result<()> {
+    fn compare_baseline(&self, path: &PathBuf, results: &[(String, PipelineStats)]) -> Result<()> {
         let content = fs::read_to_string(path).map_err(|e| miette::miette!("{e}"))?;
         let baseline: serde_json::Value =
             serde_json::from_str(&content).map_err(|e| miette::miette!("{e}"))?;
 
         println!("\n═══ Comparison with baseline ═══\n");
 
-        for (name, timings) in results {
-            if let Some(base) = baseline.get(name) {
-                let base_vm = base["vm_total_us"].as_f64().unwrap_or(0.0);
-                let curr_vm = timings.total_vm().as_micros() as f64;
+        // Support new format with "results" wrapper
+        let baseline_results = baseline.get("results").unwrap_or(&baseline);
+
+        for (name, stats) in results {
+            if let Some(base) = baseline_results.get(name) {
+                let base_vm = base["vm_total_avg_us"].as_f64().unwrap_or(0.0);
+                let curr_vm = stats.avg.total_vm().as_micros() as f64;
 
                 let change = ((curr_vm - base_vm) / base_vm) * 100.0;
                 let arrow = if change < -5.0 {
@@ -212,50 +211,69 @@ impl BenchCmd {
     fn save_baseline_file(
         &self,
         path: &PathBuf,
-        results: &[(String, PipelineTimings)],
+        results: &[(String, PipelineStats)],
     ) -> Result<()> {
-        let mut map = serde_json::Map::new();
-
-        for (name, timings) in results {
-            map.insert(name.clone(), timings.to_json_map().into());
+        let mut results_map = serde_json::Map::new();
+        for (name, stats) in results {
+            results_map.insert(name.clone(), stats.to_json_map().into());
         }
 
-        let content = serde_json::to_string_pretty(&map).map_err(|e| miette::miette!("{e}"))?;
+        let mut root = serde_json::Map::new();
+        root.insert("iterations".into(), self.iterations.into());
+        root.insert("results".into(), results_map.into());
+
+        let content = serde_json::to_string_pretty(&root).map_err(|e| miette::miette!("{e}"))?;
         fs::write(path, content).map_err(|e| miette::miette!("{e}"))?;
         println!("\nBaseline saved to {:?}", path);
 
         Ok(())
     }
 
-    fn output_json(&self, results: &[(String, PipelineTimings)]) -> Result<()> {
-        let mut map = serde_json::Map::new();
-        for (name, timings) in results {
-            map.insert(name.clone(), timings.to_json_map().into());
+    fn output_json(&self, results: &[(String, PipelineStats)]) -> Result<()> {
+        let mut results_map = serde_json::Map::new();
+        for (name, stats) in results {
+            results_map.insert(name.clone(), stats.to_json_map().into());
         }
-        let json = serde_json::to_string_pretty(&map).map_err(|e| miette::miette!("{e}"))?;
+
+        let mut root = serde_json::Map::new();
+        root.insert("iterations".into(), self.iterations.into());
+        root.insert("results".into(), results_map.into());
+
+        let json = serde_json::to_string_pretty(&root).map_err(|e| miette::miette!("{e}"))?;
         println!("\n{}", json);
         Ok(())
     }
 
-    fn output_csv(&self, results: &[(String, PipelineTimings)]) -> Result<()> {
+    fn output_csv(&self, results: &[(String, PipelineStats)]) -> Result<()> {
         println!(
-            "\nname,lex_us,parse_us,hir_us,infer_us,mir_us,compile_us,vm_exec_us,vm_total_us,jit_compile_us,jit_exec_us,jit_total_us"
+            "\nname,lex_avg_us,lex_stddev_us,parse_avg_us,parse_stddev_us,hir_avg_us,hir_stddev_us,infer_avg_us,infer_stddev_us,mir_avg_us,mir_stddev_us,compile_avg_us,compile_stddev_us,vm_exec_avg_us,vm_exec_stddev_us,vm_total_avg_us,jit_compile_avg_us,jit_compile_stddev_us,jit_exec_avg_us,jit_exec_stddev_us,jit_total_avg_us"
         );
-        for (name, t) in results {
+        for (name, s) in results {
+            let avg = &s.avg;
+            let sd = &s.stddev;
             println!(
-                "{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 name,
-                t.lex.as_micros(),
-                t.parse.as_micros(),
-                t.hir.as_micros(),
-                t.infer.as_micros(),
-                t.mir.as_micros(),
-                t.compile.as_micros(),
-                t.vm_exec.map(|d| d.as_micros()).unwrap_or(0),
-                t.total_vm().as_micros(),
-                t.jit_compile.map(|d| d.as_micros()).unwrap_or(0),
-                t.jit_exec.map(|d| d.as_micros()).unwrap_or(0),
-                t.total_jit().as_micros(),
+                avg.lex.as_micros(),
+                sd.lex.as_micros(),
+                avg.parse.as_micros(),
+                sd.parse.as_micros(),
+                avg.hir.as_micros(),
+                sd.hir.as_micros(),
+                avg.infer.as_micros(),
+                sd.infer.as_micros(),
+                avg.mir.as_micros(),
+                sd.mir.as_micros(),
+                avg.compile.as_micros(),
+                sd.compile.as_micros(),
+                avg.vm_exec.map(|d| d.as_micros()).unwrap_or(0),
+                sd.vm_exec.map(|d| d.as_micros()).unwrap_or(0),
+                avg.total_vm().as_micros(),
+                avg.jit_compile.map(|d| d.as_micros()).unwrap_or(0),
+                sd.jit_compile.map(|d| d.as_micros()).unwrap_or(0),
+                avg.jit_exec.map(|d| d.as_micros()).unwrap_or(0),
+                sd.jit_exec.map(|d| d.as_micros()).unwrap_or(0),
+                avg.total_jit().as_micros(),
             );
         }
         Ok(())
