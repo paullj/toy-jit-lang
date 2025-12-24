@@ -33,11 +33,11 @@ jobs:
             benchmark-dev
             benchmark-main
 
-      # Run benchmarks
+      # Run benchmarks (5 warmup + 15 measured iterations)
       - name: Run benchmarks
         run: |
           cargo build --profile optimised-max
-          cargo run --profile optimised-max -- bench -n 10 --save-baseline benchmarks/current.json
+          cargo run --profile optimised-max -- bench -n 15 -w 5 --save-baseline benchmarks/current.json
 
       # Compare with baseline (for PRs)
       - name: Compare with baseline
@@ -54,20 +54,20 @@ jobs:
         run: |
           mkdir -p benchmarks/cross-lang
 
-          # Go - compile and run 10 times, take median
-          go build -o /tmp/fib_go ./benchmarks/scripts/fib_20.go
+          # Go - compile and run 10 times, take median (outputs ms)
+          go build -o /tmp/fib_go ./benchmarks/scripts/fib_30.go
           for i in {1..10}; do /tmp/fib_go | tail -1; done | sort -n | sed -n '5p' > benchmarks/cross-lang/go.txt
 
-          # Python - run 10 times, take median
-          for i in {1..10}; do python3 benchmarks/scripts/fib_20.py | tail -1; done | sort -n | sed -n '5p' > benchmarks/cross-lang/python.txt
+          # Python - run 10 times, take median (outputs ms)
+          for i in {1..10}; do python3 benchmarks/scripts/fib_30.py | tail -1; done | sort -n | sed -n '5p' > benchmarks/cross-lang/python.txt
 
-          # Lua - install and run 10 times, take median
+          # Lua - install and run 10 times, take median (outputs ms)
           sudo apt-get install -y lua5.4
-          for i in {1..10}; do lua5.4 benchmarks/scripts/fib_20.lua | tail -1; done | sort -n | sed -n '5p' > benchmarks/cross-lang/lua.txt
+          for i in {1..10}; do lua5.4 benchmarks/scripts/fib_30.lua | tail -1; done | sort -n | sed -n '5p' > benchmarks/cross-lang/lua.txt
 
-          # Extract toy VM and JIT times from current.json
-          toy_vm=$(jq -r '.results.fib_20.vm_exec_avg_us // .fib_20.vm_exec_avg_us' benchmarks/current.json)
-          toy_jit=$(jq -r '.results.fib_20.jit_exec_avg_us // .fib_20.jit_exec_avg_us' benchmarks/current.json)
+          # Extract toy VM and JIT times from current.json (convert µs to ms)
+          toy_vm=$(jq -r '(.results.fib_30.vm_exec_avg_us // .fib_30.vm_exec_avg_us) / 1000' benchmarks/current.json)
+          toy_jit=$(jq -r '(.results.fib_30.jit_exec_avg_us // .fib_30.jit_exec_avg_us) / 1000' benchmarks/current.json)
 
           # Create results JSON
           cat <<EOF > benchmarks/cross-lang/results.json
@@ -125,12 +125,17 @@ jobs:
 
             let body = '## Benchmark Results\n\n';
 
-            const formatValue = (avg) => {
+            // Format µs values
+            const formatUs = (avg) => {
               if (avg === undefined || avg === null) return '-';
-              if (avg >= 1000) {
-                return `${(avg / 1000).toFixed(1)}ms`;
-              }
+              if (avg >= 1000) return `${(avg / 1000).toFixed(1)}ms`;
               return `${Math.round(avg)}µs`;
+            };
+
+            // Format ms values (for cross-lang)
+            const formatMs = (avg) => {
+              if (avg === undefined || avg === null) return '-';
+              return `${avg.toFixed(1)}ms`;
             };
 
             try {
@@ -140,31 +145,21 @@ jobs:
                 baselineData = JSON.parse(fs.readFileSync('benchmarks/baseline.json'));
               } catch (e) {}
 
-              const iterations = currentData.iterations || 10;
+              const iterations = currentData.iterations || 15;
               const current = currentData.results || currentData;
               const baseline = baselineData?.results || baselineData;
 
               let improvements = 0;
               let regressions = 0;
               let unchanged = 0;
-              let highVarianceMetrics = [];
 
-              const checkVariance = (name, metric, avg, stddev) => {
-                if (!avg || !stddev || avg === 0) return;
-                const cv = (stddev / avg) * 100; // coefficient of variation
-                if (cv > 25) {
-                  highVarianceMetrics.push(`${name}/${metric}: ±${cv.toFixed(0)}%`);
-                }
-              };
-
-              // Helper to get value from baseline (supports old and new format)
               const getBaseValue = (base, newKey, oldKey) => {
                 if (!base) return null;
                 return base[newKey] ?? base[oldKey] ?? null;
               };
 
               const formatCell = (currAvg, baseAvg) => {
-                const value = formatValue(currAvg);
+                const value = formatUs(currAvg);
                 if (!baseAvg || baseAvg === 0) return value;
 
                 const diff = ((currAvg - baseAvg) / baseAvg) * 100;
@@ -182,70 +177,43 @@ jobs:
                 }
               };
 
-              body += `**${iterations} iterations per script**\n\n`;
+              body += `**${iterations} iterations per script (5 warmup)**\n\n`;
 
-              // Table 1: Compilation stages
-              body += '### Compilation\n\n';
-              body += '| Script | lex | parse | hir | infer | **frontend** | mir | compile |\n';
-              body += '|--------|-----|-------|-----|-------|--------------|-----|--------|\n';
-
-              for (const [name, data] of Object.entries(current)) {
-                const base = baseline?.[name];
-                // Check variance for each metric
-                checkVariance(name, 'lex', data.lex_avg_us, data.lex_stddev_us);
-                checkVariance(name, 'parse', data.parse_avg_us, data.parse_stddev_us);
-                checkVariance(name, 'hir', data.hir_avg_us, data.hir_stddev_us);
-                checkVariance(name, 'infer', data.infer_avg_us, data.infer_stddev_us);
-                checkVariance(name, 'mir', data.mir_avg_us, data.mir_stddev_us);
-                checkVariance(name, 'compile', data.compile_avg_us, data.compile_stddev_us);
-
-                // Get baseline values (support old format: _us, new format: _avg_us)
-                const baseLex = getBaseValue(base, 'lex_avg_us', 'lex_us');
-                const baseParse = getBaseValue(base, 'parse_avg_us', 'parse_us');
-                const baseHir = getBaseValue(base, 'hir_avg_us', 'hir_us');
-                const baseInfer = getBaseValue(base, 'infer_avg_us', 'infer_us');
-                const baseMir = getBaseValue(base, 'mir_avg_us', 'mir_us');
-                const baseCompile = getBaseValue(base, 'compile_avg_us', 'compile_us');
-
-                // Calculate frontend total (lex + parse + hir + infer)
-                const frontend = (data.lex_avg_us || 0) + (data.parse_avg_us || 0) + (data.hir_avg_us || 0) + (data.infer_avg_us || 0);
-                const baseFrontend = (baseLex || 0) + (baseParse || 0) + (baseHir || 0) + (baseInfer || 0) || null;
-
-                body += `| ${name} `;
-                body += `| ${formatCell(data.lex_avg_us, baseLex)} `;
-                body += `| ${formatCell(data.parse_avg_us, baseParse)} `;
-                body += `| ${formatCell(data.hir_avg_us, baseHir)} `;
-                body += `| ${formatCell(data.infer_avg_us, baseInfer)} `;
-                body += `| **${formatCell(frontend, baseFrontend)}** `;
-                body += `| ${formatCell(data.mir_avg_us, baseMir)} `;
-                body += `| ${formatCell(data.compile_avg_us, baseCompile)} |\n`;
-              }
-
-              // Table 2: Execution
-              body += '\n### Execution\n\n';
-              body += '| Script | vm_exec | vm_total | jit_compile | jit_exec | jit_total |\n';
-              body += '|--------|---------|----------|-------------|----------|----------|\n';
+              // Main summary table: Script | Compilation | Execution | Total
+              body += '| Script | Compilation | Execution | Total |\n';
+              body += '|--------|-------------|-----------|-------|\n';
 
               for (const [name, data] of Object.entries(current)) {
                 const base = baseline?.[name];
-                // Check variance for execution metrics
-                checkVariance(name, 'vm_exec', data.vm_exec_avg_us, data.vm_exec_stddev_us);
-                checkVariance(name, 'jit_compile', data.jit_compile_avg_us, data.jit_compile_stddev_us);
-                checkVariance(name, 'jit_exec', data.jit_exec_avg_us, data.jit_exec_stddev_us);
 
-                // Get baseline values (support old format: _us, new format: _avg_us)
-                const baseVmExec = getBaseValue(base, 'vm_exec_avg_us', 'vm_exec_us');
-                const baseVmTotal = getBaseValue(base, 'vm_total_avg_us', 'vm_total_us');
-                const baseJitCompile = getBaseValue(base, 'jit_compile_avg_us', 'jit_compile_us');
-                const baseJitExec = getBaseValue(base, 'jit_exec_avg_us', 'jit_exec_us');
-                const baseJitTotal = getBaseValue(base, 'jit_total_avg_us', 'jit_total_us');
+                // Compilation = lex + parse + hir + infer + mir + compile
+                const compilation = (data.lex_avg_us || 0) + (data.parse_avg_us || 0) +
+                  (data.hir_avg_us || 0) + (data.infer_avg_us || 0) +
+                  (data.mir_avg_us || 0) + (data.compile_avg_us || 0);
+                const baseCompilation = base ?
+                  (getBaseValue(base, 'lex_avg_us', 'lex_us') || 0) +
+                  (getBaseValue(base, 'parse_avg_us', 'parse_us') || 0) +
+                  (getBaseValue(base, 'hir_avg_us', 'hir_us') || 0) +
+                  (getBaseValue(base, 'infer_avg_us', 'infer_us') || 0) +
+                  (getBaseValue(base, 'mir_avg_us', 'mir_us') || 0) +
+                  (getBaseValue(base, 'compile_avg_us', 'compile_us') || 0) : null;
+
+                // Execution = jit_exec (prefer JIT)
+                const execution = data.jit_exec_avg_us || data.vm_exec_avg_us || 0;
+                const baseExecution = base ?
+                  (getBaseValue(base, 'jit_exec_avg_us', 'jit_exec_us') ||
+                   getBaseValue(base, 'vm_exec_avg_us', 'vm_exec_us') || 0) : null;
+
+                // Total
+                const total = data.jit_total_avg_us || data.vm_total_avg_us || 0;
+                const baseTotal = base ?
+                  (getBaseValue(base, 'jit_total_avg_us', 'jit_total_us') ||
+                   getBaseValue(base, 'vm_total_avg_us', 'vm_total_us') || 0) : null;
 
                 body += `| ${name} `;
-                body += `| ${formatCell(data.vm_exec_avg_us, baseVmExec)} `;
-                body += `| ${formatCell(data.vm_total_avg_us, baseVmTotal)} `;
-                body += `| ${formatCell(data.jit_compile_avg_us, baseJitCompile)} `;
-                body += `| ${formatCell(data.jit_exec_avg_us, baseJitExec)} `;
-                body += `| ${formatCell(data.jit_total_avg_us, baseJitTotal)} |\n`;
+                body += `| ${formatCell(compilation, baseCompilation)} `;
+                body += `| ${formatCell(execution, baseExecution)} `;
+                body += `| ${formatCell(total, baseTotal)} |\n`;
               }
 
               // Summary
@@ -259,30 +227,56 @@ jobs:
                 body += '_No baseline available for comparison_\n';
               }
 
-              // High variance warning
-              if (highVarianceMetrics.length > 0) {
-                body += `\n⚠️ **High variance** (>25% CV): ${highVarianceMetrics.join(', ')}\n`;
+              // Detailed compilation (collapsed)
+              body += '\n<details>\n<summary>Compilation Details</summary>\n\n';
+              body += '| Script | lex | parse | hir | infer | mir | compile |\n';
+              body += '|--------|-----|-------|-----|-------|-----|--------|\n';
+              for (const [name, data] of Object.entries(current)) {
+                const base = baseline?.[name];
+                body += `| ${name} `;
+                body += `| ${formatUs(data.lex_avg_us)} `;
+                body += `| ${formatUs(data.parse_avg_us)} `;
+                body += `| ${formatUs(data.hir_avg_us)} `;
+                body += `| ${formatUs(data.infer_avg_us)} `;
+                body += `| ${formatUs(data.mir_avg_us)} `;
+                body += `| ${formatUs(data.compile_avg_us)} |\n`;
               }
+              body += '\n</details>\n';
+
+              // Detailed execution (collapsed)
+              body += '\n<details>\n<summary>Execution Details</summary>\n\n';
+              body += '| Script | vm_exec | vm_total | jit_compile | jit_exec | jit_total |\n';
+              body += '|--------|---------|----------|-------------|----------|----------|\n';
+              for (const [name, data] of Object.entries(current)) {
+                body += `| ${name} `;
+                body += `| ${formatUs(data.vm_exec_avg_us)} `;
+                body += `| ${formatUs(data.vm_total_avg_us)} `;
+                body += `| ${formatUs(data.jit_compile_avg_us)} `;
+                body += `| ${formatUs(data.jit_exec_avg_us)} `;
+                body += `| ${formatUs(data.jit_total_avg_us)} |\n`;
+              }
+              body += '\n</details>\n';
+
             } catch (e) {
               body += `_Could not parse benchmark results: ${e.message}_\n`;
             }
 
-            // Cross-language comparison (collapsible)
+            // Cross-language comparison (collapsed)
             try {
               const crossLang = JSON.parse(fs.readFileSync('benchmarks/cross-lang/results.json'));
-              body += '\n<details>\n<summary><b>Cross-Language Comparison (fib_20)</b></summary>\n\n';
+              body += '\n<details>\n<summary><b>Cross-Language Comparison (fib_30)</b></summary>\n\n';
               body += '> [!WARNING]\n';
-              body += '> These are indicative numbers only. Not suitable for direct performance comparisons.\n\n';
+              body += '> Indicative only. Not suitable for direct performance comparisons.\n\n';
               body += '| Language | Exec Time |\n';
               body += '|----------|----------|\n';
-              body += `| Go | ${formatValue(crossLang.go)} |\n`;
-              body += `| Lua | ${formatValue(crossLang.lua)} |\n`;
-              body += `| Python | ${formatValue(crossLang.python)} |\n`;
-              body += `| **Toy VM** | ${formatValue(crossLang.toy_vm)} |\n`;
-              body += `| **Toy JIT** | ${formatValue(crossLang.toy_jit)} |\n`;
+              body += `| Go | ${formatMs(crossLang.go)} |\n`;
+              body += `| Lua | ${formatMs(crossLang.lua)} |\n`;
+              body += `| Python | ${formatMs(crossLang.python)} |\n`;
+              body += `| **Toy VM** | ${formatMs(crossLang.toy_vm)} |\n`;
+              body += `| **Toy JIT** | ${formatMs(crossLang.toy_jit)} |\n`;
               body += '\n</details>\n';
             } catch (e) {
-              // Cross-language results not available, skip section
+              // Cross-language results not available
             }
 
             github.rest.issues.createComment({

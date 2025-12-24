@@ -42,6 +42,10 @@ pub struct BenchCmd {
     #[arg(short = 'n', long, default_value = "10")]
     iterations: usize,
 
+    /// Number of warmup iterations (discarded).
+    #[arg(short, long, default_value = "0")]
+    warmup: usize,
+
     /// Output format: text, json, csv.
     #[arg(short, long, default_value = "text")]
     format: String,
@@ -60,16 +64,30 @@ impl BenchCmd {
         let scripts = self.collect_scripts()?;
         let mode: ExecutionMode = self.mode.into();
 
-        println!(
-            "Running {} iterations for {} scripts...\n",
-            self.iterations,
-            scripts.len()
-        );
+        if self.warmup > 0 {
+            println!(
+                "Running {} warmup + {} iterations for {} scripts...\n",
+                self.warmup,
+                self.iterations,
+                scripts.len()
+            );
+        } else {
+            println!(
+                "Running {} iterations for {} scripts...\n",
+                self.iterations,
+                scripts.len()
+            );
+        }
 
         let mut results = Vec::new();
 
         for (name, source) in &scripts {
             println!("═══ {} ═══", name);
+
+            // Warmup iterations (discarded)
+            for _ in 0..self.warmup {
+                let _ = BenchRunner::run_timed(source, mode);
+            }
 
             let mut samples = Vec::with_capacity(self.iterations);
             let mut first_result = None;

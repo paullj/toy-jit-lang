@@ -17,10 +17,10 @@ func fibonacci(n int) int {
 
 func main() {
 	start := time.Now()
-	num := 20
+	num := 30
 	fmt.Println(fibonacci(num))
 
 	elapsed := time.Since(start)
-	fmt.Printf("Execution time: %.2f ms\n", float64(elapsed.Nanoseconds())/1_000_000)
-	fmt.Printf("Execution time in us: %.2f µs\n", float64(elapsed.Nanoseconds())/1_000)
+	// Output in milliseconds for consistency with larger benchmarks
+	fmt.Printf("%.2f\n", float64(elapsed.Nanoseconds())/1_000_000)
 }

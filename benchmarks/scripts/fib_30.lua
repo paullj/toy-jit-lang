@@ -6,6 +6,7 @@ local function fib(n)
 end
 
 local start = os.clock()
-print(fib(20))
-local elapsed = (os.clock() - start) * 1000000
+print(fib(30))
+-- Output in milliseconds for consistency with larger benchmarks
+local elapsed = (os.clock() - start) * 1000
 print(string.format("%.2f", elapsed))
