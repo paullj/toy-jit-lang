@@ -49,6 +49,52 @@ jobs:
       - name: Criterion benchmarks
         run: cargo bench --profile optimised-max --package bench
 
+      # Cross-language benchmarks (indicative only)
+      - name: Cross-language benchmarks
+        run: |
+          mkdir -p benchmarks/cross-lang
+
+          # Go - compile and run 10 times
+          go build -o /tmp/fib_go examples/fib_20.go
+          go_times=""
+          for i in {1..10}; do
+            t=$(/tmp/fib_go 2>&1 | grep -oP '[\d.]+(?= µs)')
+            go_times="$go_times $t"
+          done
+          echo "$go_times" | tr ' ' '\n' | grep -v '^$' | sort -n | awk 'NR==5{print $1}' > benchmarks/cross-lang/go.txt
+
+          # Python - run 10 times
+          py_times=""
+          for i in {1..10}; do
+            t=$(python3 examples/fib_20.py 2>&1 | grep -oP '[\d.]+(?= µs)')
+            py_times="$py_times $t"
+          done
+          echo "$py_times" | tr ' ' '\n' | grep -v '^$' | sort -n | awk 'NR==5{print $1}' > benchmarks/cross-lang/python.txt
+
+          # Lua - install and run 10 times
+          sudo apt-get install -y lua5.4
+          lua_times=""
+          for i in {1..10}; do
+            t=$(lua5.4 examples/fib_20.lua 2>&1 | tail -1)
+            lua_times="$lua_times $t"
+          done
+          echo "$lua_times" | tr ' ' '\n' | grep -v '^$' | sort -n | awk 'NR==5{print $1}' > benchmarks/cross-lang/lua.txt
+
+          # Extract toy VM and JIT times from current.json
+          toy_vm=$(jq -r '.results.fib_20.vm_exec_avg_us // .fib_20.vm_exec_avg_us' benchmarks/current.json)
+          toy_jit=$(jq -r '.results.fib_20.jit_exec_avg_us // .fib_20.jit_exec_avg_us' benchmarks/current.json)
+
+          # Create results JSON
+          cat <<EOF > benchmarks/cross-lang/results.json
+          {
+            "go": $(cat benchmarks/cross-lang/go.txt),
+            "lua": $(cat benchmarks/cross-lang/lua.txt),
+            "python": $(cat benchmarks/cross-lang/python.txt),
+            "toy_vm": $toy_vm,
+            "toy_jit": $toy_jit
+          }
+          EOF
+
       # Upload results
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
@@ -57,6 +103,7 @@ jobs:
           path: |
             benchmarks/current.json
             benchmarks/baseline.json
+            benchmarks/cross-lang/results.json
             target/criterion/
 
       # Update baseline on main/dev branch pushes
@@ -231,6 +278,24 @@ jobs:
               }
             } catch (e) {
               body += `_Could not parse benchmark results: ${e.message}_\n`;
+            }
+
+            // Cross-language comparison (collapsible)
+            try {
+              const crossLang = JSON.parse(fs.readFileSync('benchmarks/cross-lang/results.json'));
+              body += '\n<details>\n<summary><b>Cross-Language Comparison (fib_20)</b></summary>\n\n';
+              body += '> [!WARNING]\n';
+              body += '> These are indicative numbers only. Not suitable for direct performance comparisons.\n\n';
+              body += '| Language | Exec Time |\n';
+              body += '|----------|----------|\n';
+              body += `| Go | ${formatValue(crossLang.go)} |\n`;
+              body += `| Lua | ${formatValue(crossLang.lua)} |\n`;
+              body += `| Python | ${formatValue(crossLang.python)} |\n`;
+              body += `| **Toy VM** | ${formatValue(crossLang.toy_vm)} |\n`;
+              body += `| **Toy JIT** | ${formatValue(crossLang.toy_jit)} |\n`;
+              body += '\n</details>\n';
+            } catch (e) {
+              // Cross-language results not available, skip section
             }
 
             github.rest.issues.createComment({
