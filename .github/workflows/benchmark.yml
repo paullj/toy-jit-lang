@@ -106,18 +106,32 @@ jobs:
 
               let improvements = 0;
               let regressions = 0;
+              let highVarianceMetrics = [];
 
-              const formatValue = (avg, stddev) => {
+              const formatValue = (avg) => {
                 if (avg === undefined || avg === null) return '-';
-                const sd = stddev || 0;
                 if (avg >= 1000) {
-                  return `${(avg / 1000).toFixed(1)}±${(sd / 1000).toFixed(1)}ms`;
+                  return `${(avg / 1000).toFixed(1)}ms`;
                 }
-                return `${avg}±${sd}µs`;
+                return `${avg}µs`;
               };
 
-              const formatCell = (currAvg, currStddev, baseAvg) => {
-                const value = formatValue(currAvg, currStddev);
+              const checkVariance = (name, metric, avg, stddev) => {
+                if (!avg || !stddev || avg === 0) return;
+                const cv = (stddev / avg) * 100; // coefficient of variation
+                if (cv > 25) {
+                  highVarianceMetrics.push(`${name}/${metric}: ±${cv.toFixed(0)}%`);
+                }
+              };
+
+              // Helper to get value from baseline (supports old and new format)
+              const getBaseValue = (base, newKey, oldKey) => {
+                if (!base) return null;
+                return base[newKey] ?? base[oldKey] ?? null;
+              };
+
+              const formatCell = (currAvg, baseAvg) => {
+                const value = formatValue(currAvg);
                 if (!baseAvg || baseAvg === 0) return value;
 
                 const diff = ((currAvg - baseAvg) / baseAvg) * 100;
@@ -136,18 +150,39 @@ jobs:
 
               // Table 1: Compilation stages
               body += '### Compilation\n\n';
-              body += '| Script | lex | parse | hir | infer | mir | compile |\n';
-              body += '|--------|-----|-------|-----|-------|-----|--------|\n';
+              body += '| Script | lex | parse | hir | infer | **frontend** | mir | compile |\n';
+              body += '|--------|-----|-------|-----|-------|--------------|-----|--------|\n';
 
               for (const [name, data] of Object.entries(current)) {
                 const base = baseline?.[name];
+                // Check variance for each metric
+                checkVariance(name, 'lex', data.lex_avg_us, data.lex_stddev_us);
+                checkVariance(name, 'parse', data.parse_avg_us, data.parse_stddev_us);
+                checkVariance(name, 'hir', data.hir_avg_us, data.hir_stddev_us);
+                checkVariance(name, 'infer', data.infer_avg_us, data.infer_stddev_us);
+                checkVariance(name, 'mir', data.mir_avg_us, data.mir_stddev_us);
+                checkVariance(name, 'compile', data.compile_avg_us, data.compile_stddev_us);
+
+                // Get baseline values (support old format: _us, new format: _avg_us)
+                const baseLex = getBaseValue(base, 'lex_avg_us', 'lex_us');
+                const baseParse = getBaseValue(base, 'parse_avg_us', 'parse_us');
+                const baseHir = getBaseValue(base, 'hir_avg_us', 'hir_us');
+                const baseInfer = getBaseValue(base, 'infer_avg_us', 'infer_us');
+                const baseMir = getBaseValue(base, 'mir_avg_us', 'mir_us');
+                const baseCompile = getBaseValue(base, 'compile_avg_us', 'compile_us');
+
+                // Calculate frontend total (lex + parse + hir + infer)
+                const frontend = (data.lex_avg_us || 0) + (data.parse_avg_us || 0) + (data.hir_avg_us || 0) + (data.infer_avg_us || 0);
+                const baseFrontend = (baseLex || 0) + (baseParse || 0) + (baseHir || 0) + (baseInfer || 0) || null;
+
                 body += `| ${name} `;
-                body += `| ${formatCell(data.lex_avg_us, data.lex_stddev_us, base?.lex_avg_us)} `;
-                body += `| ${formatCell(data.parse_avg_us, data.parse_stddev_us, base?.parse_avg_us)} `;
-                body += `| ${formatCell(data.hir_avg_us, data.hir_stddev_us, base?.hir_avg_us)} `;
-                body += `| ${formatCell(data.infer_avg_us, data.infer_stddev_us, base?.infer_avg_us)} `;
-                body += `| ${formatCell(data.mir_avg_us, data.mir_stddev_us, base?.mir_avg_us)} `;
-                body += `| ${formatCell(data.compile_avg_us, data.compile_stddev_us, base?.compile_avg_us)} |\n`;
+                body += `| ${formatCell(data.lex_avg_us, baseLex)} `;
+                body += `| ${formatCell(data.parse_avg_us, baseParse)} `;
+                body += `| ${formatCell(data.hir_avg_us, baseHir)} `;
+                body += `| ${formatCell(data.infer_avg_us, baseInfer)} `;
+                body += `| **${formatCell(frontend, baseFrontend)}** `;
+                body += `| ${formatCell(data.mir_avg_us, baseMir)} `;
+                body += `| ${formatCell(data.compile_avg_us, baseCompile)} |\n`;
               }
 
               // Table 2: Execution
@@ -157,24 +192,42 @@ jobs:
 
               for (const [name, data] of Object.entries(current)) {
                 const base = baseline?.[name];
+                // Check variance for execution metrics
+                checkVariance(name, 'vm_exec', data.vm_exec_avg_us, data.vm_exec_stddev_us);
+                checkVariance(name, 'jit_compile', data.jit_compile_avg_us, data.jit_compile_stddev_us);
+                checkVariance(name, 'jit_exec', data.jit_exec_avg_us, data.jit_exec_stddev_us);
+
+                // Get baseline values (support old format: _us, new format: _avg_us)
+                const baseVmExec = getBaseValue(base, 'vm_exec_avg_us', 'vm_exec_us');
+                const baseVmTotal = getBaseValue(base, 'vm_total_avg_us', 'vm_total_us');
+                const baseJitCompile = getBaseValue(base, 'jit_compile_avg_us', 'jit_compile_us');
+                const baseJitExec = getBaseValue(base, 'jit_exec_avg_us', 'jit_exec_us');
+                const baseJitTotal = getBaseValue(base, 'jit_total_avg_us', 'jit_total_us');
+
                 body += `| ${name} `;
-                body += `| ${formatCell(data.vm_exec_avg_us, data.vm_exec_stddev_us, base?.vm_exec_avg_us)} `;
-                body += `| ${formatCell(data.vm_total_avg_us, null, base?.vm_total_avg_us)} `;
-                body += `| ${formatCell(data.jit_compile_avg_us, data.jit_compile_stddev_us, base?.jit_compile_avg_us)} `;
-                body += `| ${formatCell(data.jit_exec_avg_us, data.jit_exec_stddev_us, base?.jit_exec_avg_us)} `;
-                body += `| ${formatCell(data.jit_total_avg_us, null, base?.jit_total_avg_us)} |\n`;
+                body += `| ${formatCell(data.vm_exec_avg_us, baseVmExec)} `;
+                body += `| ${formatCell(data.vm_total_avg_us, baseVmTotal)} `;
+                body += `| ${formatCell(data.jit_compile_avg_us, baseJitCompile)} `;
+                body += `| ${formatCell(data.jit_exec_avg_us, baseJitExec)} `;
+                body += `| ${formatCell(data.jit_total_avg_us, baseJitTotal)} |\n`;
               }
 
               // Summary
               body += '\n---\n';
               if (baseline) {
-                const unchanged = Object.keys(current).length * 10 - improvements - regressions;
+                const totalMetrics = Object.keys(current).length * 10;
+                const unchanged = totalMetrics - improvements - regressions;
                 body += `**Summary:** ${improvements} improvement${improvements !== 1 ? 's' : ''} 🟢, `;
                 body += `${regressions} regression${regressions !== 1 ? 's' : ''} 🔴, `;
                 body += `${unchanged} unchanged\n\n`;
                 body += `_Compared to baseline from ${context.payload.pull_request?.base?.ref || 'dev'}_\n`;
               } else {
                 body += '_No baseline available for comparison_\n';
+              }
+
+              // High variance warning
+              if (highVarianceMetrics.length > 0) {
+                body += `\n⚠️ **High variance** (>25% CV): ${highVarianceMetrics.join(', ')}\n`;
               }
             } catch (e) {
               body += `_Could not parse benchmark results: ${e.message}_\n`;
