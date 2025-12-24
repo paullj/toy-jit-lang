@@ -191,7 +191,9 @@ fn generate_textmate_grammar(config: &TokensConfig) -> String {
         "patterns": patterns
     });
 
-    serde_json::to_string_pretty(&grammar).unwrap()
+    let mut result = serde_json::to_string_pretty(&grammar).unwrap();
+    result.push('\n');
+    result
 }
 
 fn generate_metadata(config: &TokensConfig) -> String {

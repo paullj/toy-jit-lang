@@ -77,8 +77,7 @@ impl Runtime {
 
     fn execute_vm(&self, mir_module: &mir::Module) -> Result<(Value, Heap), RuntimeError> {
         let compiled = compile::compile(mir_module);
-        let (result, heap) = vm::run(&compiled)?;
-        Ok((result, heap))
+        Ok(vm::run(&compiled)?)
     }
 
     fn execute_jit(

@@ -1,20 +1,34 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use lasso::{Rodeo, Spur};
+
 use crate::bytecode::ConstIdx;
 
 /// A constant value in the constant pool
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Float(f64),
-    String(String),
+    StringRef(Spur),
+}
+
+impl Constant {
+    /// Display constant, requires interner for string lookup
+    pub fn display(&self, interner: &Rodeo) -> String {
+        match self {
+            Constant::Float(n) => format!("{}", n),
+            Constant::StringRef(spur) => {
+                format!("\"{}\"", interner.resolve(spur).escape_default())
+            }
+        }
+    }
 }
 
 impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constant::Float(n) => write!(f, "{}", n),
-            Constant::String(s) => write!(f, "\"{}\"", s.escape_default()),
+            Constant::StringRef(spur) => write!(f, "StringRef({:?})", spur),
         }
     }
 }
@@ -24,7 +38,6 @@ impl fmt::Display for Constant {
 pub struct ConstantPool {
     constants: Vec<Constant>,
     float_map: HashMap<u64, ConstIdx>,
-    string_map: HashMap<String, ConstIdx>,
 }
 
 impl ConstantPool {
@@ -43,13 +56,13 @@ impl ConstantPool {
         idx
     }
 
-    pub fn add_string(&mut self, s: String) -> ConstIdx {
-        if let Some(&idx) = self.string_map.get(&s) {
-            return idx;
-        }
+    pub fn add_string(&mut self, s: &str, interner: &mut Rodeo) -> ConstIdx {
+        let spur = interner.get_or_intern(s);
+        // Note: We still create a new ConstIdx even for duplicate strings
+        // because different LoadConst instructions may reference the same string.
+        // The actual string storage is deduplicated in the Rodeo.
         let idx = ConstIdx(self.constants.len() as u32);
-        self.string_map.insert(s.clone(), idx);
-        self.constants.push(Constant::String(s));
+        self.constants.push(Constant::StringRef(spur));
         idx
     }
 

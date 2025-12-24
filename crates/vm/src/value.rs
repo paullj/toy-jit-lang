@@ -2,6 +2,9 @@
 
 use std::cell::Cell;
 
+use compile::Spur;
+use lasso::{Key, Rodeo};
+
 /// Value tag discriminant
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,13 +13,15 @@ pub enum ValueTag {
     Bool = 1,
     Int = 2,
     Float = 3,
-    String = 4,
-    Closure = 5,
+    InternedString = 4,
+    DynamicString = 5,
+    Closure = 6,
 }
 
 /// Compact 16-byte runtime value.
 ///
-/// Heap-allocated types (String, Closure) store an index into the Heap pools.
+/// Heap-allocated types (DynamicString, Closure) store an index into the Heap pools.
+/// InternedString stores a Spur key into the module's string interner.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Value {
@@ -62,10 +67,21 @@ impl Value {
         }
     }
 
+    /// Create an interned string value (references module string table)
     #[inline]
-    pub const fn string(idx: u32) -> Self {
+    pub fn interned_string(spur: Spur) -> Self {
         Self {
-            tag: ValueTag::String,
+            tag: ValueTag::InternedString,
+            _pad: [0; 7],
+            bits: spur.into_usize() as u64,
+        }
+    }
+
+    /// Create a dynamic string value (references heap)
+    #[inline]
+    pub const fn dynamic_string(idx: u32) -> Self {
+        Self {
+            tag: ValueTag::DynamicString,
             _pad: [0; 7],
             bits: idx as u64,
         }
@@ -113,8 +129,23 @@ impl Value {
     }
 
     #[inline]
-    pub fn as_string_idx(&self) -> Option<u32> {
-        if self.tag == ValueTag::String {
+    pub fn is_string(&self) -> bool {
+        self.tag == ValueTag::InternedString || self.tag == ValueTag::DynamicString
+    }
+
+    #[inline]
+    pub fn as_interned_string(&self) -> Option<Spur> {
+        if self.tag == ValueTag::InternedString {
+            // We stored a valid Spur's usize, so this should always succeed
+            Spur::try_from_usize(self.bits as usize)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn as_dynamic_string_idx(&self) -> Option<u32> {
+        if self.tag == ValueTag::DynamicString {
             Some(self.bits as u32)
         } else {
             None
@@ -141,19 +172,23 @@ impl Value {
             ValueTag::Bool => "Bool",
             ValueTag::Int => "Int",
             ValueTag::Float => "Float",
-            ValueTag::String => "String",
+            ValueTag::InternedString | ValueTag::DynamicString => "String",
             ValueTag::Closure => "Closure",
         }
     }
 
-    /// Display value as string, requires heap for String/Closure lookup.
+    /// Display value as string (for results after execution).
+    /// Panics if value is an interned string (should be materialized before returning).
     pub fn display(&self, heap: &Heap) -> String {
         match self.tag {
             ValueTag::Unit => "()".to_string(),
             ValueTag::Bool => format!("{}", self.bits != 0),
             ValueTag::Int => format!("{}", self.bits as i64),
             ValueTag::Float => format!("{}", f64::from_bits(self.bits)),
-            ValueTag::String => heap.get_string(self.bits as u32).to_string(),
+            ValueTag::InternedString => {
+                panic!("cannot display interned string without interner - should be materialized")
+            }
+            ValueTag::DynamicString => heap.get_string(self.bits as u32).to_string(),
             ValueTag::Closure => {
                 let closure = heap.get_closure(self.bits as u32);
                 format!("<closure fn{}>", closure.func_idx)
@@ -161,26 +196,50 @@ impl Value {
         }
     }
 
-    /// Structural equality, requires heap for String/Closure comparison.
-    pub fn eq(&self, other: &Value, heap: &Heap) -> bool {
-        if self.tag != other.tag {
-            return false;
-        }
+    /// Display value with interner (for use during execution with Echo).
+    pub fn display_with_interner(&self, heap: &Heap, interner: &Rodeo) -> String {
         match self.tag {
-            ValueTag::Unit => true,
-            ValueTag::Bool | ValueTag::Int => self.bits == other.bits,
-            ValueTag::Float => {
+            ValueTag::Unit => "()".to_string(),
+            ValueTag::Bool => format!("{}", self.bits != 0),
+            ValueTag::Int => format!("{}", self.bits as i64),
+            ValueTag::Float => format!("{}", f64::from_bits(self.bits)),
+            ValueTag::InternedString => {
+                let spur =
+                    Spur::try_from_usize(self.bits as usize).expect("invalid interned string spur");
+                interner.resolve(&spur).to_string()
+            }
+            ValueTag::DynamicString => heap.get_string(self.bits as u32).to_string(),
+            ValueTag::Closure => {
+                let closure = heap.get_closure(self.bits as u32);
+                format!("<closure fn{}>", closure.func_idx)
+            }
+        }
+    }
+
+    /// Structural equality, requires heap and interner for string comparison.
+    pub fn eq(&self, other: &Value, heap: &Heap, interner: &Rodeo) -> bool {
+        match (self.tag, other.tag) {
+            (ValueTag::Unit, ValueTag::Unit) => true,
+            (ValueTag::Bool, ValueTag::Bool) | (ValueTag::Int, ValueTag::Int) => {
+                self.bits == other.bits
+            }
+            (ValueTag::Float, ValueTag::Float) => {
                 let a = f64::from_bits(self.bits);
                 let b = f64::from_bits(other.bits);
                 a == b
             }
-            ValueTag::String => {
-                let a = heap.get_string(self.bits as u32);
-                let b = heap.get_string(other.bits as u32);
+            // Fast path: both interned with same key
+            (ValueTag::InternedString, ValueTag::InternedString) if self.bits == other.bits => true,
+            // String comparison (any combination of interned/dynamic)
+            (
+                ValueTag::InternedString | ValueTag::DynamicString,
+                ValueTag::InternedString | ValueTag::DynamicString,
+            ) => {
+                let a = self.get_str(heap, interner);
+                let b = other.get_str(heap, interner);
                 a == b
             }
-            ValueTag::Closure => {
-                // Closures equal if same func and same captures
+            (ValueTag::Closure, ValueTag::Closure) => {
                 let a = heap.get_closure(self.bits as u32);
                 let b = heap.get_closure(other.bits as u32);
                 if a.func_idx != b.func_idx {
@@ -190,12 +249,26 @@ impl Value {
                     return false;
                 }
                 for (ca, cb) in a.captures.iter().zip(b.captures.iter()) {
-                    if !ca.get().eq(&cb.get(), heap) {
+                    if !ca.get().eq(&cb.get(), heap, interner) {
                         return false;
                     }
                 }
                 true
             }
+            _ => false,
+        }
+    }
+
+    /// Get string content (works for both interned and dynamic)
+    fn get_str<'a>(&self, heap: &'a Heap, interner: &'a Rodeo) -> &'a str {
+        match self.tag {
+            ValueTag::InternedString => {
+                let spur =
+                    Spur::try_from_usize(self.bits as usize).expect("invalid interned string spur");
+                interner.resolve(&spur)
+            }
+            ValueTag::DynamicString => heap.get_string(self.bits as u32),
+            _ => panic!("not a string"),
         }
     }
 }
@@ -207,7 +280,8 @@ impl std::fmt::Debug for Value {
             ValueTag::Bool => write!(f, "Bool({})", self.bits != 0),
             ValueTag::Int => write!(f, "Int({})", self.bits as i64),
             ValueTag::Float => write!(f, "Float({})", f64::from_bits(self.bits)),
-            ValueTag::String => write!(f, "String(idx={})", self.bits),
+            ValueTag::InternedString => write!(f, "InternedString(spur={})", self.bits),
+            ValueTag::DynamicString => write!(f, "DynamicString(idx={})", self.bits),
             ValueTag::Closure => write!(f, "Closure(idx={})", self.bits),
         }
     }
@@ -219,7 +293,7 @@ pub struct ClosureData {
     pub captures: Box<[Cell<Value>]>,
 }
 
-/// Heap for strings and closures.
+/// Heap for dynamic strings and closures.
 pub struct Heap {
     strings: Vec<String>,
     closures: Vec<ClosureData>,
@@ -283,14 +357,25 @@ mod tests {
     }
 
     #[test]
-    fn test_heap_string() {
+    fn test_heap_dynamic_string() {
         let mut heap = Heap::new();
         let idx = heap.alloc_string("hello".to_string());
         assert_eq!(heap.get_string(idx), "hello");
 
-        let val = Value::string(idx);
-        assert_eq!(val.as_string_idx(), Some(idx));
+        let val = Value::dynamic_string(idx);
+        assert_eq!(val.as_dynamic_string_idx(), Some(idx));
         assert_eq!(val.display(&heap), "hello");
+    }
+
+    #[test]
+    fn test_interned_string() {
+        let heap = Heap::new();
+        let mut interner = Rodeo::default();
+        let spur = interner.get_or_intern("world");
+
+        let val = Value::interned_string(spur);
+        assert_eq!(val.as_interned_string(), Some(spur));
+        assert_eq!(val.display_with_interner(&heap, &interner), "world");
     }
 
     #[test]
@@ -318,14 +403,24 @@ mod tests {
     #[test]
     fn test_structural_equality() {
         let mut heap = Heap::new();
+        let mut interner = Rodeo::default();
 
         // Primitives
-        assert!(Value::int(5).eq(&Value::int(5), &heap));
-        assert!(!Value::int(5).eq(&Value::int(6), &heap));
+        assert!(Value::int(5).eq(&Value::int(5), &heap, &interner));
+        assert!(!Value::int(5).eq(&Value::int(6), &heap, &interner));
 
-        // Strings
-        let s1 = heap.alloc_string("test".to_string());
-        let s2 = heap.alloc_string("test".to_string());
-        assert!(Value::string(s1).eq(&Value::string(s2), &heap));
+        // Interned strings (same spur = fast path)
+        let spur = interner.get_or_intern("test");
+        let s1 = Value::interned_string(spur);
+        let s2 = Value::interned_string(spur);
+        assert!(s1.eq(&s2, &heap, &interner));
+
+        // Dynamic strings
+        let d1 = heap.alloc_string("test".to_string());
+        let d2 = heap.alloc_string("test".to_string());
+        assert!(Value::dynamic_string(d1).eq(&Value::dynamic_string(d2), &heap, &interner));
+
+        // Interned vs dynamic with same content
+        assert!(s1.eq(&Value::dynamic_string(d1), &heap, &interner));
     }
 }

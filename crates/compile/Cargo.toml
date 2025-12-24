@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 mir = { path = "../mir" }
+lasso = "0.7"

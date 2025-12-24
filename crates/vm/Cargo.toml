@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 compile = { path = "../compile" }
+lasso = "0.7"
 
 [dev-dependencies]
 mir = { path = "../mir" }
