@@ -35,9 +35,7 @@ jobs:
 
       # Run benchmarks (5 warmup + 15 measured iterations)
       - name: Run benchmarks
-        run: |
-          cargo build --profile optimised-max
-          cargo run --profile optimised-max -- bench -n 15 -w 5 --save-baseline benchmarks/current.json
+        run: cargo run --profile optimised-max -- bench -n 15 -w 5 --save-baseline benchmarks/current.json
 
       # Compare with baseline (for PRs)
       - name: Compare with baseline
