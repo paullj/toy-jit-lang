@@ -36,18 +36,18 @@ jobs:
       # Run benchmarks
       - name: Run benchmarks
         run: |
-          cargo build --release
-          cargo run --release -- bench -n 10 --save-baseline benchmarks/current.json
+          cargo build --profile optimised-max
+          cargo run --profile optimised-max -- bench -n 10 --save-baseline benchmarks/current.json
 
       # Compare with baseline (for PRs)
       - name: Compare with baseline
         if: github.event_name == 'pull_request' && hashFiles('benchmarks/baseline.json') != ''
         run: |
-          cargo run --release -- bench --baseline benchmarks/baseline.json
+          cargo run --profile optimised-max -- bench --baseline benchmarks/baseline.json
 
       # Run criterion benchmarks
       - name: Criterion benchmarks
-        run: cargo bench --package bench
+        run: cargo bench --profile optimised-max --package bench
 
       # Upload results
       - name: Upload benchmark results

@@ -41,6 +41,11 @@ impl Jit {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
         flag_builder.set("is_pic", "false").unwrap();
+        flag_builder.set("opt_level", "speed").unwrap();
+        flag_builder.set("enable_alias_analysis", "true").unwrap();
+
+        #[cfg(not(debug_assertions))]
+        flag_builder.set("enable_verifier", "false").unwrap();
 
         let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
             panic!("host machine is not supported: {}", msg);

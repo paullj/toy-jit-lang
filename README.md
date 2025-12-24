@@ -54,10 +54,7 @@ toy is a simple programming language that is made for fun.
     * for x in y
     * loop
 
-* garbage collection
-  * reference counting?
-  * tracing gc?
-  * hybrid?
+* garbage collection improvements
 
 * structs
 * tuples
@@ -112,6 +109,10 @@ toy is a simple programming language that is made for fun.
   * channels
 
 * tree sitter?
+
+* improve playground
+  * ??
+
 
 * good repl
   * lots of bugs right now
