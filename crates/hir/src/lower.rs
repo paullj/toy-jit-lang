@@ -429,10 +429,15 @@ fn lower_block(ctx: &mut Ctx, ast: ast::BlockExpression) -> Expression {
     }
 
     // Tail is the last item if it's an expression (not definition/assignment)
-    let tail = items.last().and_then(|item| match item {
-        BlockItem::Expression(idx) => Some(*idx),
+    // Remove it from items to avoid processing it twice in MIR lowering
+    let tail = match items.last() {
+        Some(BlockItem::Expression(idx)) => {
+            let idx = *idx;
+            items.pop();
+            Some(idx)
+        }
         _ => None,
-    });
+    };
 
     // Warn on empty blocks
     if items.is_empty() && tail.is_none() {
