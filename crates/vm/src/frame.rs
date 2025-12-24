@@ -1,7 +1,6 @@
 //! Call frame for function invocation.
 
 use crate::value::Value;
-use compile::Reg;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -10,8 +9,9 @@ use std::rc::Rc;
 pub struct CallFrame {
     pub return_pc: usize,
     pub return_chunk: usize,
-    pub base_reg: usize,
-    pub base_local: usize,
-    pub result_reg: Option<Reg>,
+    /// Base index into the unified stack for this frame
+    pub stack_base: usize,
+    /// Result slot relative to caller's stack_base (if any)
+    pub result_slot: Option<u32>,
     pub closure_env: Option<Rc<RefCell<Vec<Value>>>>,
 }
