@@ -54,31 +54,16 @@ jobs:
         run: |
           mkdir -p benchmarks/cross-lang
 
-          # Go - compile and run 10 times
+          # Go - compile and run 10 times, take median
           go build -o /tmp/fib_go ./benchmarks/scripts/fib_20.go
-          go_times=""
-          for i in {1..10}; do
-            t=$(/tmp/fib_go 2>&1 | grep -oP '[\d.]+(?= µs)')
-            go_times="$go_times $t"
-          done
-          echo "$go_times" | tr ' ' '\n' | grep -v '^$' | sort -n | awk 'NR==5{print $1}' > benchmarks/cross-lang/go.txt
+          for i in {1..10}; do /tmp/fib_go | tail -1; done | sort -n | sed -n '5p' > benchmarks/cross-lang/go.txt
 
-          # Python - run 10 times
-          py_times=""
-          for i in {1..10}; do
-            t=$(python3 benchmarks/scripts/fib_20.py 2>&1 | grep -oP '[\d.]+(?= µs)')
-            py_times="$py_times $t"
-          done
-          echo "$py_times" | tr ' ' '\n' | grep -v '^$' | sort -n | awk 'NR==5{print $1}' > benchmarks/cross-lang/python.txt
+          # Python - run 10 times, take median
+          for i in {1..10}; do python3 benchmarks/scripts/fib_20.py | tail -1; done | sort -n | sed -n '5p' > benchmarks/cross-lang/python.txt
 
-          # Lua - install and run 10 times
+          # Lua - install and run 10 times, take median
           sudo apt-get install -y lua5.4
-          lua_times=""
-          for i in {1..10}; do
-            t=$(lua5.4 benchmarks/scripts/fib_20.lua 2>&1 | tail -1)
-            lua_times="$lua_times $t"
-          done
-          echo "$lua_times" | tr ' ' '\n' | grep -v '^$' | sort -n | awk 'NR==5{print $1}' > benchmarks/cross-lang/lua.txt
+          for i in {1..10}; do lua5.4 benchmarks/scripts/fib_20.lua | tail -1; done | sort -n | sed -n '5p' > benchmarks/cross-lang/lua.txt
 
           # Extract toy VM and JIT times from current.json
           toy_vm=$(jq -r '.results.fib_20.vm_exec_avg_us // .fib_20.vm_exec_avg_us' benchmarks/current.json)
@@ -140,6 +125,14 @@ jobs:
 
             let body = '## Benchmark Results\n\n';
 
+            const formatValue = (avg) => {
+              if (avg === undefined || avg === null) return '-';
+              if (avg >= 1000) {
+                return `${(avg / 1000).toFixed(1)}ms`;
+              }
+              return `${Math.round(avg)}µs`;
+            };
+
             try {
               const currentData = JSON.parse(fs.readFileSync('benchmarks/current.json'));
               let baselineData = null;
@@ -153,15 +146,8 @@ jobs:
 
               let improvements = 0;
               let regressions = 0;
+              let unchanged = 0;
               let highVarianceMetrics = [];
-
-              const formatValue = (avg) => {
-                if (avg === undefined || avg === null) return '-';
-                if (avg >= 1000) {
-                  return `${(avg / 1000).toFixed(1)}ms`;
-                }
-                return `${avg}µs`;
-              };
 
               const checkVariance = (name, metric, avg, stddev) => {
                 if (!avg || !stddev || avg === 0) return;
@@ -182,14 +168,17 @@ jobs:
                 if (!baseAvg || baseAvg === 0) return value;
 
                 const diff = ((currAvg - baseAvg) / baseAvg) * 100;
-                if (Math.abs(diff) < 5) return value;
+                if (Math.abs(diff) < 10) {
+                  unchanged++;
+                  return value;
+                }
 
-                if (diff < -5) {
+                if (diff < -10) {
                   improvements++;
-                  return `${value} 🟢↓${Math.abs(diff).toFixed(0)}%`;
+                  return `${value}<br>🟢↓${Math.abs(diff).toFixed(0)}%`;
                 } else {
                   regressions++;
-                  return `${value} 🔴↑${diff.toFixed(0)}%`;
+                  return `${value}<br>🔴↑${diff.toFixed(0)}%`;
                 }
               };
 
@@ -262,8 +251,6 @@ jobs:
               // Summary
               body += '\n---\n';
               if (baseline) {
-                const totalMetrics = Object.keys(current).length * 10;
-                const unchanged = totalMetrics - improvements - regressions;
                 body += `**Summary:** ${improvements} improvement${improvements !== 1 ? 's' : ''} 🟢, `;
                 body += `${regressions} regression${regressions !== 1 ? 's' : ''} 🔴, `;
                 body += `${unchanged} unchanged\n\n`;
