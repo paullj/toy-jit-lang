@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hir::{BlockItem, Definition, ExprIdx, Expression, InfixOp, Item, Literal, PrefixOp};
+use hir::{BlockItem, Definition, ExprIdx, Expression, Ident, InfixOp, Item, Literal, PrefixOp};
 use infer::InferenceResult;
 
 use crate::ir::{
@@ -65,6 +65,11 @@ impl<'a> LowerCtx<'a> {
             func_names: HashMap::new(),
             capture_map: HashMap::new(),
         }
+    }
+
+    /// Resolve an Ident to its string representation
+    fn resolve(&self, ident: Ident) -> &str {
+        self.hir.resolve(ident)
     }
 
     fn save_context(&mut self) -> SavedContext {
@@ -153,7 +158,8 @@ impl<'a> LowerCtx<'a> {
         for item in &self.hir.items {
             if let Item::Definition(Definition::Function { name, .. }) = item {
                 let func_id = self.alloc_func_id();
-                self.func_names.insert(name.clone(), func_id);
+                let name_str = self.resolve(*name).to_string();
+                self.func_names.insert(name_str, func_id);
             }
         }
 
@@ -167,8 +173,9 @@ impl<'a> LowerCtx<'a> {
                 name, params, body, ..
             }) = &item
             {
-                let func_id = self.func_names[name];
-                self.lower_function_def(func_id, Some(name.clone()), params, *body);
+                let name_str = self.resolve(*name).to_string();
+                let func_id = self.func_names[&name_str];
+                self.lower_function_def(func_id, Some(name_str), params, *body);
             }
         }
 
@@ -185,8 +192,9 @@ impl<'a> LowerCtx<'a> {
             match item {
                 Item::Definition(Definition::Function { name, .. }) => {
                     // Allocate local for function reference (for indirect calls)
-                    let func_id = self.func_names[name];
-                    let local = self.alloc_local(name);
+                    let name_str = self.resolve(*name).to_string();
+                    let func_id = self.func_names[&name_str];
+                    let local = self.alloc_local(&name_str);
                     let dst = self.fresh_vreg();
                     // Store function reference as a closure with no captures
                     self.emit(Inst::MakeClosure {
@@ -200,16 +208,18 @@ impl<'a> LowerCtx<'a> {
                     });
                 }
                 Item::Definition(Definition::Variable { name, value }) => {
+                    let name_str = self.resolve(*name).to_string();
                     let operand = self.lower_expr(value);
-                    let local = self.alloc_local(name);
+                    let local = self.alloc_local(&name_str);
                     self.emit(Inst::StoreLocal {
                         local,
                         src: operand,
                     });
                 }
                 Item::Assignment { name, value } => {
+                    let name_str = self.resolve(*name).to_string();
                     let operand = self.lower_expr(value);
-                    if let Some(local) = self.get_local(name) {
+                    if let Some(local) = self.get_local(&name_str) {
                         self.emit(Inst::StoreLocal {
                             local,
                             src: operand,
@@ -270,10 +280,11 @@ impl<'a> LowerCtx<'a> {
             .map(|p| {
                 let local = LocalId(self.next_local);
                 self.next_local += 1;
+                let name_str = self.resolve(p.name).to_string();
                 self.local_scopes
                     .last_mut()
                     .unwrap()
-                    .insert(p.name.clone(), local);
+                    .insert(name_str, local);
                 local
             })
             .collect();
@@ -313,7 +324,7 @@ impl<'a> LowerCtx<'a> {
         &mut self,
         params: &[hir::FunctionParam],
         body: ExprIdx,
-        captures: &[String],
+        captures: &[Ident],
     ) -> Operand {
         let func_id = self.alloc_func_id();
 
@@ -321,7 +332,8 @@ impl<'a> LowerCtx<'a> {
         let capture_ops: Vec<Operand> = captures
             .iter()
             .filter_map(|name| {
-                if let Some(local) = self.get_local(name) {
+                let name_str = self.resolve(*name);
+                if let Some(local) = self.get_local(name_str) {
                     let dst = self.fresh_vreg();
                     self.emit(Inst::LoadLocal { dst, local });
                     Some(Operand::VReg(dst))
@@ -334,8 +346,9 @@ impl<'a> LowerCtx<'a> {
         let capture_vars: Vec<CapturedVar> = captures
             .iter()
             .filter_map(|name| {
-                self.get_local(name).map(|local| CapturedVar {
-                    name: name.clone(),
+                let name_str = self.resolve(*name);
+                self.get_local(name_str).map(|local| CapturedVar {
+                    name: name_str.to_string(),
                     outer_local: local,
                 })
             })
@@ -366,10 +379,11 @@ impl<'a> LowerCtx<'a> {
             .map(|p| {
                 let local = LocalId(self.next_local);
                 self.next_local += 1;
+                let name_str = self.resolve(p.name).to_string();
                 self.local_scopes
                     .last_mut()
                     .unwrap()
-                    .insert(p.name.clone(), local);
+                    .insert(name_str, local);
                 local
             })
             .collect();
@@ -422,16 +436,17 @@ impl<'a> LowerCtx<'a> {
         let dst = self.fresh_vreg();
 
         // Check if callee is a direct function reference
-        if let Expression::VariableRef { name } = callee
-            && let Some(&func_id) = self.func_names.get(name)
-        {
-            // Direct call to known function
-            self.emit(Inst::Call {
-                dst: Some(dst),
-                func: func_id,
-                args: arg_ops,
-            });
-            return Operand::VReg(dst);
+        if let Expression::VariableRef { name } = callee {
+            let name_str = self.resolve(*name);
+            if let Some(&func_id) = self.func_names.get(name_str) {
+                // Direct call to known function
+                self.emit(Inst::Call {
+                    dst: Some(dst),
+                    func: func_id,
+                    args: arg_ops,
+                });
+                return Operand::VReg(dst);
+            }
         }
 
         // Otherwise, indirect call through closure
@@ -451,7 +466,10 @@ impl<'a> LowerCtx<'a> {
             Expression::Literal(lit) => self.lower_literal(lit),
             Expression::Infix { op, lhs, rhs } => self.lower_infix(*op, *lhs, *rhs),
             Expression::Prefix { op, expr } => self.lower_prefix(*op, *expr),
-            Expression::VariableRef { name } => self.lower_var_ref(name),
+            Expression::VariableRef { name } => {
+                let name_str = self.resolve(*name).to_string();
+                self.lower_var_ref(&name_str)
+            }
             Expression::Block { items, tail } => self.lower_block(items, *tail),
             Expression::If {
                 condition,
@@ -646,16 +664,18 @@ impl<'a> LowerCtx<'a> {
         for item in items {
             match item {
                 BlockItem::Definition { name, value } => {
+                    let name_str = self.resolve(*name).to_string();
                     let operand = self.lower_expr_idx(*value);
-                    let local = self.alloc_local(name);
+                    let local = self.alloc_local(&name_str);
                     self.emit(Inst::StoreLocal {
                         local,
                         src: operand,
                     });
                 }
                 BlockItem::Assignment { name, value } => {
+                    let name_str = self.resolve(*name).to_string();
                     let operand = self.lower_expr_idx(*value);
-                    if let Some(local) = self.get_local(name) {
+                    if let Some(local) = self.get_local(&name_str) {
                         self.emit(Inst::StoreLocal {
                             local,
                             src: operand,
@@ -742,18 +762,12 @@ impl<'a> LowerCtx<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hir::{Definition, Expression, Item, Literal};
-    use la_arena::Arena;
+    use ast::AstNode;
 
-    fn make_hir(items: Vec<Item>) -> hir::LowerResult {
-        hir::LowerResult {
-            items,
-            expressions: Arena::new(),
-            expr_spans: Default::default(),
-            item_spans: vec![Default::default()],
-            symbols: Default::default(),
-            diagnostics: Default::default(),
-        }
+    fn hir_from_source(source: &str) -> hir::LowerResult {
+        let (syntax, _errors) = parse::parse(source);
+        let root = ast::Root::cast(syntax).expect("failed to cast to Root");
+        hir::lower(root)
     }
 
     fn make_types() -> InferenceResult {
@@ -762,10 +776,7 @@ mod tests {
 
     #[test]
     fn test_lower_literal() {
-        let hir = make_hir(vec![Item::Definition(Definition::Variable {
-            name: "x".to_string(),
-            value: Expression::Literal(Literal::Integer(42)),
-        })]);
+        let hir = hir_from_source("x := 42");
         let types = make_types();
         let module = lower(&hir, &types);
 
@@ -775,43 +786,7 @@ mod tests {
 
     #[test]
     fn test_lower_function_def() {
-        let mut exprs: Arena<Expression> = Arena::new();
-        let a_ref = exprs.alloc(Expression::VariableRef {
-            name: "a".to_string(),
-        });
-        let b_ref = exprs.alloc(Expression::VariableRef {
-            name: "b".to_string(),
-        });
-        let add_expr = exprs.alloc(Expression::Infix {
-            op: InfixOp::Add,
-            lhs: a_ref,
-            rhs: b_ref,
-        });
-
-        let hir = hir::LowerResult {
-            items: vec![Item::Definition(Definition::Function {
-                name: "add".to_string(),
-                params: vec![
-                    hir::FunctionParam {
-                        name: "a".to_string(),
-                        ty: None,
-                        default: None,
-                    },
-                    hir::FunctionParam {
-                        name: "b".to_string(),
-                        ty: None,
-                        default: None,
-                    },
-                ],
-                return_type: None,
-                body: add_expr,
-            })],
-            expressions: exprs,
-            expr_spans: Default::default(),
-            item_spans: vec![Default::default()],
-            symbols: Default::default(),
-            diagnostics: Default::default(),
-        };
+        let hir = hir_from_source("fn add(a, b) { a + b }");
         let types = make_types();
         let module = lower(&hir, &types);
 

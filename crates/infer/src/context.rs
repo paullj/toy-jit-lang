@@ -11,7 +11,7 @@ use crate::suggest::find_similar;
 use crate::types::{Type, TypeVar};
 use crate::unify::{UnifyError, unify};
 use crate::{InferState, InferWithState, InferenceResult};
-use hir::{BlockItem, Definition, ExprIdx, Expression, Item, Literal, TextRange};
+use hir::{BlockItem, Definition, ExprIdx, Expression, Ident, Item, Literal, TextRange};
 
 fn to_span(range: TextRange) -> SourceSpan {
     let start: usize = range.start().into();
@@ -55,6 +55,11 @@ impl<'a> InferCtx<'a> {
         }
     }
 
+    /// Resolve an Ident to its string representation
+    fn resolve(&self, ident: Ident) -> &str {
+        self.hir.resolve(ident)
+    }
+
     fn fresh_var(&mut self) -> TypeVar {
         let v = TypeVar::new(self.next_var);
         self.next_var += 1;
@@ -88,7 +93,7 @@ impl<'a> InferCtx<'a> {
             .iter()
             .map(|p| {
                 let ty = match &p.ty {
-                    Some(name) => self.parse_type_name(name),
+                    Some(ty_name) => self.parse_type_name(self.resolve(*ty_name)),
                     None => Type::Var(self.fresh_var()),
                 };
 
@@ -99,7 +104,8 @@ impl<'a> InferCtx<'a> {
                 }
 
                 // Bind param in scope (monomorphic)
-                self.env.insert(p.name.clone(), Scheme::mono(ty.clone()));
+                self.env
+                    .insert(self.resolve(p.name).to_string(), Scheme::mono(ty.clone()));
                 ty
             })
             .collect();
@@ -195,11 +201,12 @@ impl<'a> InferCtx<'a> {
     fn infer_item(&mut self, item: &Item, span: TextRange) {
         match item {
             Item::Definition(Definition::Variable { name, value }) => {
+                let name_str = self.resolve(*name).to_string();
                 let ty = self.infer_expr(value, span);
                 // Apply current substitution before generalizing
                 let ty = self.subst.apply(&ty);
                 let scheme = Scheme::generalize(&self.env, &ty);
-                self.env.insert(name.clone(), scheme);
+                self.env.insert(name_str, scheme);
             }
             Item::Definition(Definition::Function {
                 name,
@@ -207,11 +214,13 @@ impl<'a> InferCtx<'a> {
                 return_type,
                 body,
             }) => {
-                let fn_ty = self.infer_function(Some(name), params, *body, span);
+                let name_str = self.resolve(*name).to_string();
+                let ret_type_str = return_type.map(|r| self.resolve(r).to_string());
+                let fn_ty = self.infer_function(Some(&name_str), params, *body, span);
 
                 // Check explicit return annotation if present
-                if let Some(ret_name) = return_type {
-                    let annotated_ret = self.parse_type_name(ret_name);
+                if let Some(ret_name) = ret_type_str {
+                    let annotated_ret = self.parse_type_name(&ret_name);
                     if let Type::Function { ret, .. } = &fn_ty {
                         self.unify_or_error(&annotated_ret, ret, span);
                     }
@@ -221,12 +230,13 @@ impl<'a> InferCtx<'a> {
                 let fn_ty = self.subst.apply(&fn_ty);
                 // Generalize and store in env (for polymorphism)
                 let scheme = Scheme::generalize(&self.env, &fn_ty);
-                self.env.insert(name.clone(), scheme);
+                self.env.insert(name_str, scheme);
             }
             Item::Assignment { name, value } => {
+                let name_str = self.resolve(*name).to_string();
                 let value_ty = self.infer_expr(value, span);
                 // Clone scheme to avoid borrow conflict with fresh_var
-                let scheme = self.env.lookup(name).cloned();
+                let scheme = self.env.lookup(&name_str).cloned();
                 match scheme {
                     Some(scheme) => {
                         let var_ty = scheme.instantiate(|| self.fresh_var());
@@ -235,15 +245,15 @@ impl<'a> InferCtx<'a> {
                     None => {
                         // Check for similar names first
                         let suggestion =
-                            find_similar(name, self.env.iter().map(|(n, _)| n.as_str()), 2);
+                            find_similar(&name_str, self.env.iter().map(|(n, _)| n.as_str()), 2);
                         // If no similar name found, suggest using := to define
                         let suggestion = suggestion.or_else(|| {
                             Some(format!(
-                                "use `:=` to define a new variable: `{name} := ...`"
+                                "use `:=` to define a new variable: `{name_str} := ...`"
                             ))
                         });
                         self.diagnostics.push(InferDiagnostic::Undefined {
-                            name: name.clone(),
+                            name: name_str,
                             span: to_span(span),
                             suggestion,
                         });
@@ -260,7 +270,10 @@ impl<'a> InferCtx<'a> {
         match expr {
             Expression::Missing => Type::Error,
             Expression::Literal(lit) => literal_type(lit),
-            Expression::VariableRef { name } => self.lookup(name, span),
+            Expression::VariableRef { name } => {
+                let name_str = self.resolve(*name).to_string();
+                self.lookup(&name_str, span)
+            }
             Expression::Infix { op, lhs, rhs } => self.infer_infix(*op, *lhs, *rhs),
             Expression::Prefix { op, expr } => self.infer_prefix(*op, *expr),
             Expression::Block { items, tail } => self.infer_block(items, *tail),
@@ -279,7 +292,7 @@ impl<'a> InferCtx<'a> {
 
                 // Check explicit return annotation if present
                 if let Some(ret_name) = return_type {
-                    let annotated_ret = self.parse_type_name(ret_name);
+                    let annotated_ret = self.parse_type_name(self.resolve(*ret_name));
                     if let Type::Function { ret, .. } = &fn_ty {
                         self.unify_or_error(&annotated_ret, ret, span);
                     }
@@ -382,29 +395,34 @@ impl<'a> InferCtx<'a> {
         for item in items {
             match item {
                 BlockItem::Definition { name, value } => {
+                    let name_str = self.resolve(*name).to_string();
                     let (ty, _) = self.infer_expr_idx(*value);
                     let ty = self.subst.apply(&ty);
                     let scheme = Scheme::generalize(&self.env, &ty);
-                    self.env.insert(name.clone(), scheme);
+                    self.env.insert(name_str, scheme);
                 }
                 BlockItem::Assignment { name, value } => {
+                    let name_str = self.resolve(*name).to_string();
                     let (value_ty, span) = self.infer_expr_idx(*value);
-                    let scheme = self.env.lookup(name).cloned();
+                    let scheme = self.env.lookup(&name_str).cloned();
                     match scheme {
                         Some(scheme) => {
                             let var_ty = scheme.instantiate(|| self.fresh_var());
                             self.unify_or_error(&var_ty, &value_ty, span);
                         }
                         None => {
-                            let suggestion =
-                                find_similar(name, self.env.iter().map(|(n, _)| n.as_str()), 2);
+                            let suggestion = find_similar(
+                                &name_str,
+                                self.env.iter().map(|(n, _)| n.as_str()),
+                                2,
+                            );
                             let suggestion = suggestion.or_else(|| {
                                 Some(format!(
-                                    "use `:=` to define a new variable: `{name} := ...`"
+                                    "use `:=` to define a new variable: `{name_str} := ...`"
                                 ))
                             });
                             self.diagnostics.push(InferDiagnostic::Undefined {
-                                name: name.clone(),
+                                name: name_str,
                                 span: to_span(span),
                                 suggestion,
                             });

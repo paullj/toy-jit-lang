@@ -8,33 +8,63 @@ pub use symbols::{Symbol, SymbolKind, SymbolTable};
 pub use syntax::TextRange;
 
 use la_arena::Idx;
+use lasso::{Key, Spur};
+use std::fmt;
+
+/// Re-export Rodeo for downstream crates
+pub use lasso::Rodeo as Interner;
 
 pub type ExprIdx = Idx<Expression>;
+
+/// Interned identifier.
+///
+/// This is a newtype around `Spur` to distinguish identifiers from other interned strings.
+/// Use `LowerResult::resolve(&self, ident)` to get the string value.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Ident(Spur);
+
+impl Ident {
+    /// Create a new Ident from a Spur
+    pub fn new(spur: Spur) -> Self {
+        Self(spur)
+    }
+
+    /// Get the underlying Spur
+    pub fn spur(self) -> Spur {
+        self.0
+    }
+}
+
+impl fmt::Debug for Ident {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Ident({})", self.0.into_usize())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Item {
     Definition(Definition),
-    Assignment { name: String, value: Expression },
+    Assignment { name: Ident, value: Expression },
     Expression(Expression),
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionParam {
-    pub name: String,
-    pub ty: Option<String>,
+    pub name: Ident,
+    pub ty: Option<Ident>,
     pub default: Option<ExprIdx>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Definition {
     Variable {
-        name: String,
+        name: Ident,
         value: Expression,
     },
     Function {
-        name: String,
+        name: Ident,
         params: Vec<FunctionParam>,
-        return_type: Option<String>,
+        return_type: Option<Ident>,
         body: ExprIdx,
     },
 }
@@ -53,7 +83,7 @@ pub enum Expression {
         expr: ExprIdx,
     },
     VariableRef {
-        name: String,
+        name: Ident,
     },
     Block {
         items: Vec<BlockItem>,
@@ -66,9 +96,9 @@ pub enum Expression {
     },
     Function {
         params: Vec<FunctionParam>,
-        return_type: Option<String>,
+        return_type: Option<Ident>,
         body: ExprIdx,
-        captures: Vec<String>,
+        captures: Vec<Ident>,
     },
     Call {
         callee: ExprIdx,
@@ -85,8 +115,8 @@ pub enum Expression {
 /// Item inside a block expression
 #[derive(Debug, Clone)]
 pub enum BlockItem {
-    Definition { name: String, value: ExprIdx },
-    Assignment { name: String, value: ExprIdx },
+    Definition { name: Ident, value: ExprIdx },
+    Assignment { name: Ident, value: ExprIdx },
     Expression(ExprIdx),
     Return { value: Option<ExprIdx> },
     Echo { value: ExprIdx },
@@ -97,7 +127,7 @@ pub enum Literal {
     Integer(u64),
     Float(f64),
     Boolean(bool),
-    String(String),
+    String(String), // String literals stay as String (not identifiers)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

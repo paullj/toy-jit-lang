@@ -1067,6 +1067,7 @@ version = "0.1.0"
 dependencies = [
  "ast",
  "la-arena",
+ "lasso",
  "miette",
  "parse",
  "syntax",
@@ -1503,9 +1504,11 @@ dependencies = [
 name = "mir"
 version = "0.1.0"
 dependencies = [
+ "ast",
  "hir",
  "infer",
  "la-arena",
+ "parse",
 ]
 
 [[package]]

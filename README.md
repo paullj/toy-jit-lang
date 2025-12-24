@@ -42,6 +42,9 @@ toy is a simple programming language that is made for fun.
   * shadowing variables
   * unreachable code
 
+* clean up
+  * maybe make cli just a cli and move all the logic elsewhere
+
 * functions
 * closures
 

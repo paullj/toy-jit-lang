@@ -88,7 +88,10 @@ impl Runtime {
     ) -> Result<(Value, Heap), RuntimeError> {
         let jit_compiler = self.jit.as_mut().expect("JIT not initialized");
 
-        let result_type = hir.items.last().map(|item| get_item_type(item, inferred));
+        let result_type = hir
+            .items
+            .last()
+            .map(|item| get_item_type(item, hir, inferred));
 
         // Use new multi-function compilation if there are multiple functions
         if mir_module.functions.len() > 1 {
@@ -192,23 +195,23 @@ impl Runtime {
     }
 }
 
-fn get_item_type(item: &Item, inferred: &InferenceResult) -> Type {
+fn get_item_type(item: &Item, hir: &LowerResult, inferred: &InferenceResult) -> Type {
     match item {
         Item::Definition(Definition::Variable { name, .. }) => inferred
-            .get_variable_type(name)
+            .get_variable_type(hir.resolve(*name))
             .cloned()
             .unwrap_or(Type::Integer),
         // TODO: Full function types in 02-functions-type-inference.md
         Item::Definition(Definition::Function { .. }) => Type::Unit,
         Item::Assignment { name, .. } => inferred
-            .get_variable_type(name)
+            .get_variable_type(hir.resolve(*name))
             .cloned()
             .unwrap_or(Type::Integer),
-        Item::Expression(expr) => get_expr_type(expr, inferred),
+        Item::Expression(expr) => get_expr_type(expr, hir, inferred),
     }
 }
 
-fn get_expr_type(expr: &Expression, inferred: &InferenceResult) -> Type {
+fn get_expr_type(expr: &Expression, hir: &LowerResult, inferred: &InferenceResult) -> Type {
     match expr {
         Expression::Missing => Type::Integer,
         Expression::Literal(lit) => match lit {
@@ -242,7 +245,7 @@ fn get_expr_type(expr: &Expression, inferred: &InferenceResult) -> Type {
             PrefixOp::Not => Type::Boolean,
         },
         Expression::VariableRef { name } => inferred
-            .get_variable_type(name)
+            .get_variable_type(hir.resolve(*name))
             .cloned()
             .unwrap_or(Type::Integer),
         Expression::Block { tail, .. } => match tail {

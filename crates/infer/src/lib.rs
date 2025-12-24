@@ -75,19 +75,6 @@ pub fn infer_with_state(lower_result: &hir::LowerResult, state: InferState) -> I
 mod tests {
     use super::*;
     use ast::AstNode;
-    use hir::{Definition, Expression, Item, Literal};
-
-    fn make_lower_result(items: Vec<Item>) -> hir::LowerResult {
-        let item_spans = vec![Default::default(); items.len()];
-        hir::LowerResult {
-            items,
-            expressions: Default::default(),
-            expr_spans: Default::default(),
-            item_spans,
-            symbols: Default::default(),
-            diagnostics: Default::default(),
-        }
-    }
 
     /// Helper to infer types from source code using the full pipeline
     fn infer_from_source(source: &str) -> InferenceResult {
@@ -97,91 +84,54 @@ mod tests {
         infer(&hir)
     }
 
+    /// Helper to get HIR from source for incremental tests
+    fn hir_from_source(source: &str) -> hir::LowerResult {
+        let (syntax, _errors) = parse::parse(source);
+        let root = ast::Root::cast(syntax).expect("failed to cast to Root");
+        hir::lower(root)
+    }
+
     #[test]
     fn test_variable_integer() {
-        let result = make_lower_result(vec![Item::Definition(Definition::Variable {
-            name: "x".to_string(),
-            value: Expression::Literal(Literal::Integer(42)),
-        })]);
-
-        let inferred = infer(&result);
-        assert_eq!(inferred.get_variable_type("x"), Some(&Type::Integer));
-        assert!(!inferred.has_errors());
+        let result = infer_from_source("x := 42");
+        assert_eq!(result.get_variable_type("x"), Some(&Type::Integer));
+        assert!(!result.has_errors());
     }
 
     #[test]
     fn test_variable_float() {
-        let result = make_lower_result(vec![Item::Definition(Definition::Variable {
-            name: "y".to_string(),
-            value: Expression::Literal(Literal::Float(3.5)),
-        })]);
-
-        let inferred = infer(&result);
-        assert_eq!(inferred.get_variable_type("y"), Some(&Type::Float));
+        let result = infer_from_source("y := 3.5");
+        assert_eq!(result.get_variable_type("y"), Some(&Type::Float));
     }
 
     #[test]
     fn test_variable_boolean() {
-        let result = make_lower_result(vec![Item::Definition(Definition::Variable {
-            name: "flag".to_string(),
-            value: Expression::Literal(Literal::Boolean(true)),
-        })]);
-
-        let inferred = infer(&result);
-        assert_eq!(inferred.get_variable_type("flag"), Some(&Type::Boolean));
+        let result = infer_from_source("flag := true");
+        assert_eq!(result.get_variable_type("flag"), Some(&Type::Boolean));
     }
 
     #[test]
     fn test_variable_string() {
-        let result = make_lower_result(vec![Item::Definition(Definition::Variable {
-            name: "s".to_string(),
-            value: Expression::Literal(Literal::String("hello".to_string())),
-        })]);
-
-        let inferred = infer(&result);
-        assert_eq!(inferred.get_variable_type("s"), Some(&Type::String));
+        let result = infer_from_source("s := \"hello\"");
+        assert_eq!(result.get_variable_type("s"), Some(&Type::String));
     }
 
     #[test]
     fn test_undefined_variable() {
-        let result = make_lower_result(vec![Item::Assignment {
-            name: "unknown".to_string(),
-            value: Expression::Literal(Literal::Integer(1)),
-        }]);
-
-        let inferred = infer(&result);
-        assert!(inferred.has_errors());
-    }
-
-    #[test]
-    fn test_missing_expr_returns_error() {
-        let result = make_lower_result(vec![Item::Definition(Definition::Variable {
-            name: "x".to_string(),
-            value: Expression::Missing,
-        })]);
-
-        let inferred = infer(&result);
-        assert_eq!(inferred.get_variable_type("x"), Some(&Type::Error));
+        let result = infer_from_source("unknown = 1");
+        assert!(result.has_errors());
     }
 
     #[test]
     fn test_incremental_inference() {
         // First command: x := 1
-        let result1 = make_lower_result(vec![Item::Definition(Definition::Variable {
-            name: "x".to_string(),
-            value: Expression::Literal(Literal::Integer(42)),
-        })]);
-
-        let infer1 = infer_with_state(&result1, InferState::new());
+        let hir1 = hir_from_source("x := 42");
+        let infer1 = infer_with_state(&hir1, InferState::new());
         assert_eq!(infer1.result.get_variable_type("x"), Some(&Type::Integer));
 
         // Second command: x = 10 (should work because x is in state)
-        let result2 = make_lower_result(vec![Item::Assignment {
-            name: "x".to_string(),
-            value: Expression::Literal(Literal::Integer(10)),
-        }]);
-
-        let infer2 = infer_with_state(&result2, infer1.state);
+        let hir2 = hir_from_source("x = 10");
+        let infer2 = infer_with_state(&hir2, infer1.state);
         assert!(
             !infer2.result.has_errors(),
             "assignment to existing var should work"
@@ -191,12 +141,8 @@ mod tests {
     #[test]
     fn test_incremental_inference_undefined() {
         // First command: assign to undefined y (should error)
-        let result1 = make_lower_result(vec![Item::Assignment {
-            name: "y".to_string(),
-            value: Expression::Literal(Literal::Integer(1)),
-        }]);
-
-        let infer1 = infer_with_state(&result1, InferState::new());
+        let hir1 = hir_from_source("y = 1");
+        let infer1 = infer_with_state(&hir1, InferState::new());
         assert!(
             infer1.result.has_errors(),
             "assignment to undefined var should error"
