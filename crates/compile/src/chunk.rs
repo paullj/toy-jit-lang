@@ -1,3 +1,5 @@
+use lasso::Rodeo;
+
 use crate::bytecode::Instruction;
 use crate::constant::ConstantPool;
 
@@ -42,10 +44,12 @@ impl Default for Chunk {
 }
 
 /// A compiled module containing all functions
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CompiledModule {
     pub chunks: Vec<Chunk>,
     pub main_idx: usize,
+    /// Interned string table for all string constants
+    pub strings: Rodeo,
 }
 
 impl CompiledModule {

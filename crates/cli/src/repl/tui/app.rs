@@ -149,7 +149,10 @@ impl ReplApp {
         let mut jit = jit::Jit::new();
 
         // Determine return type from last item
-        let result_type = lower.items.last().map(|item| get_item_type(item, infer));
+        let result_type = lower
+            .items
+            .last()
+            .map(|item| get_item_type(item, lower, infer));
 
         let jit_ret_type = match result_type {
             Some(infer::Type::Float) => jit::ReturnType::Float,
@@ -169,12 +172,14 @@ impl ReplApp {
             match last_item {
                 hir::Item::Expression(_) => Some(result),
                 hir::Item::Definition(hir::Definition::Variable { name, .. }) => {
-                    Some(format!("{} = {}", name, result))
+                    Some(format!("{} = {}", lower.resolve(*name), result))
                 }
                 hir::Item::Definition(hir::Definition::Function { name, .. }) => {
-                    Some(format!("{} = <function>", name))
+                    Some(format!("{} = <function>", lower.resolve(*name)))
                 }
-                hir::Item::Assignment { name, .. } => Some(format!("{} = {}", name, result)),
+                hir::Item::Assignment { name, .. } => {
+                    Some(format!("{} = {}", lower.resolve(*name), result))
+                }
             }
         } else {
             None
@@ -239,24 +244,32 @@ impl ReplApp {
     }
 }
 
-fn get_item_type(item: &hir::Item, infer: &infer::InferenceResult) -> infer::Type {
+fn get_item_type(
+    item: &hir::Item,
+    hir: &hir::LowerResult,
+    infer: &infer::InferenceResult,
+) -> infer::Type {
     match item {
         hir::Item::Definition(hir::Definition::Variable { name, .. }) => infer
             .variable_types
-            .get(name)
+            .get(hir.resolve(*name))
             .cloned()
             .unwrap_or(infer::Type::Integer),
         hir::Item::Definition(hir::Definition::Function { .. }) => infer::Type::Unit,
         hir::Item::Assignment { name, .. } => infer
             .variable_types
-            .get(name)
+            .get(hir.resolve(*name))
             .cloned()
             .unwrap_or(infer::Type::Integer),
-        hir::Item::Expression(expr) => get_expr_type(expr, infer),
+        hir::Item::Expression(expr) => get_expr_type(expr, hir, infer),
     }
 }
 
-fn get_expr_type(expr: &hir::Expression, infer: &infer::InferenceResult) -> infer::Type {
+fn get_expr_type(
+    expr: &hir::Expression,
+    hir: &hir::LowerResult,
+    infer: &infer::InferenceResult,
+) -> infer::Type {
     match expr {
         hir::Expression::Missing => infer::Type::Integer,
         hir::Expression::Literal(lit) => match lit {
@@ -283,7 +296,7 @@ fn get_expr_type(expr: &hir::Expression, infer: &infer::InferenceResult) -> infe
         },
         hir::Expression::VariableRef { name } => infer
             .variable_types
-            .get(name)
+            .get(hir.resolve(*name))
             .cloned()
             .unwrap_or(infer::Type::Integer),
         hir::Expression::Block { tail, .. } => match tail {

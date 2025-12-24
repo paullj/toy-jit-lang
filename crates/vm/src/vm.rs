@@ -1,6 +1,6 @@
 //! Virtual machine state and execution.
 
-use compile::{Chunk, CompiledModule, ConstIdx, Instruction, Slot};
+use compile::{Chunk, CompiledModule, ConstIdx, Instruction, Rodeo, Slot};
 
 use crate::error::RuntimeError;
 use crate::frame::CallFrame;
@@ -15,8 +15,10 @@ const FRAMES_CAPACITY: usize = 256;
 pub struct Vm<'a> {
     /// Unified value stack (locals + temps for all frames)
     stack: Vec<Value>,
-    /// Heap for strings and closures
+    /// Heap for dynamic strings and closures
     heap: Heap,
+    /// Interned string table (from compiled module)
+    strings: &'a Rodeo,
     /// Call frame stack
     frames: Vec<CallFrame>,
     chunks: &'a [Chunk],
@@ -36,6 +38,7 @@ impl<'a> Vm<'a> {
         Self {
             stack,
             heap: Heap::new(),
+            strings: &module.strings,
             frames: Vec::with_capacity(FRAMES_CAPACITY),
             chunks: &module.chunks,
             current_chunk: module.main_idx,
@@ -163,7 +166,8 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
-    /// Execute the VM until completion. Returns (result, heap) to allow displaying heap values.
+    /// Execute the VM until completion. Returns (result, heap).
+    /// If the result is an interned string, it's resolved to a dynamic string for portability.
     pub fn execute(mut self) -> Result<(Value, Heap), RuntimeError> {
         loop {
             let chunk = &self.chunks[self.current_chunk];
@@ -446,7 +450,7 @@ impl<'a> Vm<'a> {
                 // I/O
                 Instruction::Echo { src } => {
                     let val = self.get(base, src);
-                    println!("{}", val.display(&self.heap));
+                    println!("{}", val.display_with_interner(&self.heap, self.strings));
                 }
 
                 // End
@@ -456,7 +460,20 @@ impl<'a> Vm<'a> {
             }
         }
 
-        Ok((self.last_value, self.heap))
+        // Materialize interned strings in result so it's displayable without the interner
+        let result = self.materialize_value(self.last_value);
+        Ok((result, self.heap))
+    }
+
+    /// If value is an interned string, resolve it to a dynamic string.
+    fn materialize_value(&mut self, value: Value) -> Value {
+        if let Some(spur) = value.as_interned_string() {
+            let s = self.strings.resolve(&spur).to_string();
+            let idx = self.heap.alloc_string(s);
+            Value::dynamic_string(idx)
+        } else {
+            value
+        }
     }
 
     fn load_const(
@@ -466,9 +483,9 @@ impl<'a> Vm<'a> {
     ) -> Result<Value, RuntimeError> {
         match pool.get(idx) {
             Some(compile::Constant::Float(f)) => Ok(Value::float(*f)),
-            Some(compile::Constant::String(s)) => {
-                let str_idx = self.heap.alloc_string(s.clone());
-                Ok(Value::string(str_idx))
+            Some(compile::Constant::StringRef(spur)) => {
+                // No clone! Just store the Spur key directly
+                Ok(Value::interned_string(*spur))
             }
             None => Err(RuntimeError::InvalidConstant(idx.0)),
         }

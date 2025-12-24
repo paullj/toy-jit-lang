@@ -1,16 +1,19 @@
 use std::collections::HashMap;
 
+use lasso::Rodeo;
 use mir::{BlockId, FuncId, Inst, LocalId, Module, Operand, VReg};
 
 use crate::bytecode::{FuncIdx, Instruction, Label, Slot};
 use crate::chunk::{Chunk, CompiledModule};
 
 pub fn compile(mir: &Module) -> CompiledModule {
+    let mut strings = Rodeo::default();
+
     let chunks: Vec<Chunk> = mir
         .functions
         .iter()
         .map(|func| {
-            let mut compiler = Compiler::new();
+            let mut compiler = Compiler::new(&mut strings);
             compiler.compile_function(func);
             compiler.into_chunk()
         })
@@ -19,11 +22,13 @@ pub fn compile(mir: &Module) -> CompiledModule {
     CompiledModule {
         chunks,
         main_idx: mir.main_id.0 as usize,
+        strings,
     }
 }
 
-struct Compiler {
+struct Compiler<'a> {
     chunk: Chunk,
+    interner: &'a mut Rodeo,
     vreg_to_slot: HashMap<VReg, Slot>,
     /// Next temp slot (starts at local_count)
     next_slot: u32,
@@ -35,10 +40,11 @@ struct Compiler {
     label_patches: Vec<(usize, Label)>,
 }
 
-impl Compiler {
-    fn new() -> Self {
+impl<'a> Compiler<'a> {
+    fn new(interner: &'a mut Rodeo) -> Self {
         Self {
             chunk: Chunk::new(),
+            interner,
             vreg_to_slot: HashMap::new(),
             next_slot: 0,
             local_count: 0,
@@ -505,7 +511,7 @@ impl Compiler {
                 slot
             }
             Operand::StringConst(s) => {
-                let idx = self.chunk.constants.add_string(s.clone());
+                let idx = self.chunk.constants.add_string(s, self.interner);
                 let slot = self.alloc_slot();
                 self.emit(Instruction::LoadConst { dst: slot, idx });
                 slot
@@ -532,7 +538,7 @@ impl Compiler {
                 self.emit(Instruction::LoadBool { dst, value: *b });
             }
             Operand::StringConst(s) => {
-                let idx = self.chunk.constants.add_string(s.clone());
+                let idx = self.chunk.constants.add_string(s, self.interner);
                 self.emit(Instruction::LoadConst { dst, idx });
             }
         }

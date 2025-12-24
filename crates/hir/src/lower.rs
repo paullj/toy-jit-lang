@@ -1,9 +1,10 @@
 use crate::{
-    BlockItem, Definition, ExprIdx, Expression, FunctionParam, HirDiagnostic, InfixOp, Item,
+    BlockItem, Definition, ExprIdx, Expression, FunctionParam, HirDiagnostic, Ident, InfixOp, Item,
     Literal, PrefixOp, SymbolKind, SymbolTable,
 };
 use ast::AstNode;
 use la_arena::{Arena, ArenaMap};
+use lasso::Rodeo;
 use miette::SourceSpan;
 use syntax::{SyntaxKind, TextRange};
 
@@ -64,7 +65,7 @@ fn to_span(range: TextRange) -> SourceSpan {
     (start, len).into()
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LowerResult {
     pub items: Vec<Item>,
     pub expressions: Arena<Expression>,
@@ -72,6 +73,29 @@ pub struct LowerResult {
     pub item_spans: Vec<TextRange>,
     pub symbols: SymbolTable,
     pub diagnostics: Vec<HirDiagnostic>,
+    /// Identifier interner - owns all interned identifier strings
+    pub interner: Rodeo,
+}
+
+impl LowerResult {
+    /// Resolve an Ident to its string value
+    pub fn resolve(&self, ident: Ident) -> &str {
+        self.interner.resolve(&ident.spur())
+    }
+}
+
+impl Default for LowerResult {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            expressions: Arena::new(),
+            expr_spans: ArenaMap::new(),
+            item_spans: Vec::new(),
+            symbols: SymbolTable::default(),
+            diagnostics: Vec::new(),
+            interner: Rodeo::default(),
+        }
+    }
 }
 
 struct Ctx {
@@ -79,6 +103,7 @@ struct Ctx {
     expr_spans: ArenaMap<ExprIdx, TextRange>,
     symbols: SymbolTable,
     diagnostics: Vec<HirDiagnostic>,
+    interner: Rodeo,
 }
 
 impl Ctx {
@@ -88,6 +113,7 @@ impl Ctx {
             expr_spans: ArenaMap::new(),
             symbols: SymbolTable::new(),
             diagnostics: Vec::new(),
+            interner: Rodeo::default(),
         }
     }
 
@@ -97,15 +123,25 @@ impl Ctx {
         idx
     }
 
+    /// Intern an identifier string, returning an Ident
+    fn intern(&mut self, s: &str) -> Ident {
+        Ident::new(self.interner.get_or_intern(s))
+    }
+
     fn define_symbol(
         &mut self,
-        name: String,
+        name: &str,
         def_span: TextRange,
         name_span: TextRange,
         doc_comment: Option<String>,
     ) {
-        self.symbols
-            .define(name, SymbolKind::Variable, def_span, name_span, doc_comment);
+        self.symbols.define(
+            name.to_string(),
+            SymbolKind::Variable,
+            def_span,
+            name_span,
+            doc_comment,
+        );
     }
 
     fn add_reference(&mut self, name: &str, span: TextRange) {
@@ -133,6 +169,7 @@ pub fn lower(root: ast::Root) -> LowerResult {
         item_spans,
         symbols: ctx.symbols,
         diagnostics: ctx.diagnostics,
+        interner: ctx.interner,
     }
 }
 
@@ -140,17 +177,18 @@ fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
     match ast {
         ast::Item::FunctionDefinition(fn_def) => {
             let name_token = fn_def.name()?;
-            let name = name_token.text().to_string();
+            let name_str = name_token.text();
             let def_span = fn_def.syntax().text_range();
             let name_span = name_token.text_range();
             let doc_comment = extract_doc_comment(fn_def.syntax());
-            ctx.define_symbol(name.clone(), def_span, name_span, doc_comment);
+            ctx.define_symbol(name_str, def_span, name_span, doc_comment);
+            let name = ctx.intern(name_str);
 
             let params = lower_params(ctx, fn_def.params());
             let return_type = fn_def
                 .return_type()
                 .and_then(|t| t.type_token())
-                .map(|t| t.text().to_string());
+                .map(|t| ctx.intern(t.text()));
 
             let body_ast = fn_def.body();
             let body_span = body_ast
@@ -171,20 +209,22 @@ fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
         }
         ast::Item::VariableDefinition(def) => {
             let name_token = def.name()?;
-            let name = name_token.text().to_string();
+            let name_str = name_token.text();
             let def_span = def.syntax().text_range();
             let name_span = name_token.text_range();
             let doc_comment = extract_doc_comment(def.syntax());
-            ctx.define_symbol(name.clone(), def_span, name_span, doc_comment);
+            ctx.define_symbol(name_str, def_span, name_span, doc_comment);
+            let name = ctx.intern(name_str);
             let value = lower_expression(ctx, def.value());
             Some(Item::Definition(Definition::Variable { name, value }))
         }
         ast::Item::VariableAssignment(asgn) => {
             let name_token = asgn.name()?;
-            let name = name_token.text().to_string();
+            let name_str = name_token.text();
             let name_span = name_token.text_range();
             // Assignment is a reference to existing variable
-            ctx.add_reference(&name, name_span);
+            ctx.add_reference(name_str, name_span);
+            let name = ctx.intern(name_str);
             let value = lower_expression(ctx, asgn.value());
             Some(Item::Assignment { name, value })
         }
@@ -222,11 +262,12 @@ fn lower_params(ctx: &mut Ctx, params: Option<ast::ParameterList>) -> Vec<Functi
     param_list
         .params()
         .filter_map(|param| {
-            let name = param.name()?.text().to_string();
+            let name_str = param.name()?.text().to_string();
+            let name = ctx.intern(&name_str);
             let ty = param
                 .type_annotation()
                 .and_then(|t| t.type_token())
-                .map(|t| t.text().to_string());
+                .map(|t| ctx.intern(t.text()));
             let default = param.default_value().map(|e| {
                 let span = e.syntax().text_range();
                 let expr = lower_expression(ctx, Some(e));
@@ -249,9 +290,10 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
         ast::Expression::Prefix(prefix) => lower_prefix(ctx, prefix),
         ast::Expression::VariableReference(var) => {
             if let Some(name_token) = var.name() {
-                let name = name_token.text().to_string();
+                let name_str = name_token.text();
                 let ref_span = name_token.text_range();
-                ctx.add_reference(&name, ref_span);
+                ctx.add_reference(name_str, ref_span);
+                let name = ctx.intern(name_str);
                 Expression::VariableRef { name }
             } else {
                 Expression::Missing
@@ -269,7 +311,7 @@ fn lower_function_expr(ctx: &mut Ctx, fn_expr: ast::FunctionExpression) -> Expre
     let return_type = fn_expr
         .return_type()
         .and_then(|t| t.type_token())
-        .map(|t| t.text().to_string());
+        .map(|t| ctx.intern(t.text()));
 
     let body_ast = fn_expr.body();
     let body_span = body_ast
@@ -491,17 +533,18 @@ fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
         ast::Item::FunctionDefinition(fn_def) => {
             // Functions inside blocks are treated as local definitions
             let name_token = fn_def.name()?;
-            let name = name_token.text().to_string();
+            let name_str = name_token.text();
             let def_span = fn_def.syntax().text_range();
             let name_span = name_token.text_range();
             let doc_comment = extract_doc_comment(fn_def.syntax());
-            ctx.define_symbol(name.clone(), def_span, name_span, doc_comment);
+            ctx.define_symbol(name_str, def_span, name_span, doc_comment);
+            let name = ctx.intern(name_str);
 
             let params = lower_params(ctx, fn_def.params());
             let return_type = fn_def
                 .return_type()
                 .and_then(|t| t.type_token())
-                .map(|t| t.text().to_string());
+                .map(|t| ctx.intern(t.text()));
 
             let body_ast = fn_def.body();
             let body_span = body_ast
@@ -528,11 +571,12 @@ fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
         }
         ast::Item::VariableDefinition(def) => {
             let name_token = def.name()?;
-            let name = name_token.text().to_string();
+            let name_str = name_token.text();
             let def_span = def.syntax().text_range();
             let name_span = name_token.text_range();
             let doc_comment = extract_doc_comment(def.syntax());
-            ctx.define_symbol(name.clone(), def_span, name_span, doc_comment);
+            ctx.define_symbol(name_str, def_span, name_span, doc_comment);
+            let name = ctx.intern(name_str);
             let value = lower_expression(ctx, def.value());
             let value_span = def
                 .value()
@@ -546,9 +590,10 @@ fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
         }
         ast::Item::VariableAssignment(asgn) => {
             let name_token = asgn.name()?;
-            let name = name_token.text().to_string();
+            let name_str = name_token.text();
             let name_span = name_token.text_range();
-            ctx.add_reference(&name, name_span);
+            ctx.add_reference(name_str, name_span);
+            let name = ctx.intern(name_str);
             let value = lower_expression(ctx, asgn.value());
             let value_span = asgn
                 .value()
@@ -609,7 +654,7 @@ mod tests {
         let Item::Definition(Definition::Variable { name, value }) = &result.items[0] else {
             panic!("expected variable definition");
         };
-        assert_eq!(name, "x");
+        assert_eq!(result.resolve(*name), "x");
         assert!(matches!(value, Expression::Literal(Literal::Integer(42))));
     }
 
@@ -669,7 +714,7 @@ mod tests {
         let Item::Assignment { name, value } = &result.items[0] else {
             panic!("expected assignment");
         };
-        assert_eq!(name, "x");
+        assert_eq!(result.resolve(*name), "x");
         assert!(matches!(value, Expression::Literal(Literal::Integer(10))));
     }
 
@@ -679,7 +724,10 @@ mod tests {
         let Item::Definition(Definition::Variable { value, .. }) = &result.items[0] else {
             panic!("expected variable definition");
         };
-        assert!(matches!(value, Expression::VariableRef { name } if name == "y"));
+        let Expression::VariableRef { name } = value else {
+            panic!("expected variable ref");
+        };
+        assert_eq!(result.resolve(*name), "y");
     }
 
     // === Operators ===
@@ -844,7 +892,7 @@ mod tests {
         for item in &result.items {
             // Should not produce a valid variable definition with a name
             if let Item::Definition(Definition::Variable { name, .. }) = item {
-                assert!(name.is_empty());
+                assert!(result.resolve(*name).is_empty());
             }
         }
     }
@@ -978,13 +1026,21 @@ mod tests {
     fn lower_multiple_items() {
         let result = lower_src("x := 1\ny := 2\nz = 3");
         assert_eq!(result.items.len(), 3);
-        assert!(
-            matches!(&result.items[0], Item::Definition(Definition::Variable { name, .. }) if name == "x")
-        );
-        assert!(
-            matches!(&result.items[1], Item::Definition(Definition::Variable { name, .. }) if name == "y")
-        );
-        assert!(matches!(&result.items[2], Item::Assignment { name, .. } if name == "z"));
+
+        let Item::Definition(Definition::Variable { name, .. }) = &result.items[0] else {
+            panic!("expected variable definition");
+        };
+        assert_eq!(result.resolve(*name), "x");
+
+        let Item::Definition(Definition::Variable { name, .. }) = &result.items[1] else {
+            panic!("expected variable definition");
+        };
+        assert_eq!(result.resolve(*name), "y");
+
+        let Item::Assignment { name, .. } = &result.items[2] else {
+            panic!("expected assignment");
+        };
+        assert_eq!(result.resolve(*name), "z");
     }
 
     #[test]
@@ -1051,10 +1107,10 @@ mod tests {
         else {
             panic!("expected function definition");
         };
-        assert_eq!(name, "add");
+        assert_eq!(result.resolve(*name), "add");
         assert_eq!(params.len(), 2);
-        assert_eq!(params[0].name, "a");
-        assert_eq!(params[1].name, "b");
+        assert_eq!(result.resolve(params[0].name), "a");
+        assert_eq!(result.resolve(params[1].name), "b");
 
         let body_expr = &result.expressions[*body];
         assert!(matches!(body_expr, Expression::Block { .. }));
@@ -1069,8 +1125,8 @@ mod tests {
         else {
             panic!("expected function definition");
         };
-        assert_eq!(name, "double");
-        assert_eq!(return_type.as_deref(), Some("int"));
+        assert_eq!(result.resolve(*name), "double");
+        assert_eq!(result.resolve(return_type.unwrap()), "int");
     }
 
     #[test]
@@ -1079,7 +1135,7 @@ mod tests {
         let Item::Definition(Definition::Variable { name, value }) = &result.items[0] else {
             panic!("expected variable definition");
         };
-        assert_eq!(name, "inc");
+        assert_eq!(result.resolve(*name), "inc");
         assert!(matches!(value, Expression::Function { .. }));
     }
 
@@ -1093,7 +1149,10 @@ mod tests {
             panic!("expected call expression");
         };
         let callee_expr = &result.expressions[*callee];
-        assert!(matches!(callee_expr, Expression::VariableRef { name } if name == "add"));
+        let Expression::VariableRef { name } = callee_expr else {
+            panic!("expected variable ref");
+        };
+        assert_eq!(result.resolve(*name), "add");
         assert_eq!(args.len(), 2);
     }
 
@@ -1129,7 +1188,7 @@ mod tests {
             panic!("expected function definition");
         };
         assert_eq!(params.len(), 1);
-        assert_eq!(params[0].name, "name");
+        assert_eq!(result.resolve(params[0].name), "name");
         assert!(params[0].default.is_some());
     }
 }

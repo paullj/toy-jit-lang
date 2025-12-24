@@ -9,4 +9,6 @@ hir = { path = "../hir" }
 infer = { path = "../infer" }
 
 [dev-dependencies]
+ast = { path = "../ast" }
 la-arena = "0.3.1"
+parse = { path = "../parse" }
