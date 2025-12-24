@@ -56,6 +56,8 @@ toy is a simple programming language that is made for fun.
   * profile hot paths
   * jit compile hot paths
 
+* garbage collection improvements
+
 * structs
 * tuples
 * enums
@@ -109,6 +111,10 @@ toy is a simple programming language that is made for fun.
   * channels
 
 * tree sitter?
+
+* improve playground
+  * ??
+
 
 * good repl
   * lots of bugs right now

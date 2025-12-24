@@ -19,3 +19,21 @@ members = [
     "crates/cli",
     "crates/bench",
 ]
+
+# Standard release
+[profile.release]
+opt-level = 3
+debug = false
+
+# Optimised (thin LTO)
+[profile.optimised]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Maximum optimisation (fat LTO, slow compile)
+[profile.optimised-max]
+inherits = "optimised"
+lto = "fat"
