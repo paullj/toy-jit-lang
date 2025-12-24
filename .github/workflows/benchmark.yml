@@ -28,9 +28,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: benchmarks/baseline.json
-          key: benchmark-baseline-${{ github.base_ref || 'main' }}
+          key: benchmark-${{ github.base_ref || 'dev' }}
           restore-keys: |
-            benchmark-baseline-main
+            benchmark-dev
+            benchmark-main
 
       # Run benchmarks
       - name: Run benchmarks
@@ -58,18 +59,18 @@ jobs:
             benchmarks/baseline.json
             target/criterion/
 
-      # Update baseline on main
+      # Update baseline on main/dev branch pushes
       - name: Update baseline
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.event_name == 'push'
         run: |
           cp benchmarks/current.json benchmarks/baseline.json
 
       - name: Cache new baseline
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.event_name == 'push'
         uses: actions/cache/save@v4
         with:
           path: benchmarks/baseline.json
-          key: benchmark-baseline-main
+          key: benchmark-${{ github.ref_name }}
 
   # Optional: Comment on PR with results
   comment-pr:
@@ -120,7 +121,7 @@ jobs:
               }
 
               if (baseline) {
-                body += '\n_Compared to baseline from main_\n';
+                body += `\n_Compared to baseline from ${context.payload.pull_request?.base?.ref || 'dev'}_\n`;
               } else {
                 body += '\n_No baseline available for comparison_\n';
               }
