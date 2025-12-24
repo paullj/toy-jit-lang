@@ -120,22 +120,12 @@ fn run_inner(source: &str) -> RunResult {
 
     // Run
     match vm::run(&compiled) {
-        Ok(value) => {
-            let type_str = match &value {
-                vm::Value::Int(_) => "Int",
-                vm::Value::Float(_) => "Float",
-                vm::Value::Bool(_) => "Bool",
-                vm::Value::String(_) => "String",
-                vm::Value::Unit => "Unit",
-                vm::Value::Closure(_) => "Closure",
-            };
-            RunResult {
-                success: true,
-                value: Some(value.to_string()),
-                value_type: Some(type_str.into()),
-                error: None,
-            }
-        }
+        Ok((value, heap)) => RunResult {
+            success: true,
+            value: Some(value.display(&heap)),
+            value_type: Some(value.type_name().into()),
+            error: None,
+        },
         Err(e) => RunResult {
             success: false,
             value: None,

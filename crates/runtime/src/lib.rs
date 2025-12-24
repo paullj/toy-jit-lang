@@ -26,7 +26,7 @@ pub enum ExecutionMode {
 }
 
 /// Runtime value (re-exported from vm)
-pub use vm::Value;
+pub use vm::{Heap, Value};
 
 /// Runtime error
 #[derive(Debug, Error)]
@@ -61,13 +61,13 @@ impl Runtime {
         }
     }
 
-    /// Execute a MIR module and return the result.
+    /// Execute a MIR module and return the result with heap.
     pub fn execute(
         &mut self,
         mir_module: &mir::Module,
         hir: &LowerResult,
         inferred: &InferenceResult,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<(Value, Heap), RuntimeError> {
         match self.mode {
             ExecutionMode::Vm => self.execute_vm(mir_module),
             ExecutionMode::Jit => self.execute_jit(mir_module, hir, inferred),
@@ -75,10 +75,10 @@ impl Runtime {
         }
     }
 
-    fn execute_vm(&self, mir_module: &mir::Module) -> Result<Value, RuntimeError> {
+    fn execute_vm(&self, mir_module: &mir::Module) -> Result<(Value, Heap), RuntimeError> {
         let compiled = compile::compile(mir_module);
-        let result = vm::run(&compiled)?;
-        Ok(result)
+        let (result, heap) = vm::run(&compiled)?;
+        Ok((result, heap))
     }
 
     fn execute_jit(
@@ -86,7 +86,7 @@ impl Runtime {
         mir_module: &mir::Module,
         hir: &LowerResult,
         inferred: &InferenceResult,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<(Value, Heap), RuntimeError> {
         let jit_compiler = self.jit.as_mut().expect("JIT not initialized");
 
         let result_type = hir.items.last().map(|item| get_item_type(item, inferred));
@@ -105,25 +105,25 @@ impl Runtime {
                         let func: fn() -> f64 = std::mem::transmute(ptr);
                         func()
                     };
-                    Value::Float(result)
+                    Value::float(result)
                 }
                 Some(Type::Boolean) => {
                     let result: i64 = unsafe {
                         let func: fn() -> i64 = std::mem::transmute(ptr);
                         func()
                     };
-                    Value::Bool(result != 0)
+                    Value::bool(result != 0)
                 }
                 _ => {
                     let result: i64 = unsafe {
                         let func: fn() -> i64 = std::mem::transmute(ptr);
                         func()
                     };
-                    Value::Int(result)
+                    Value::int(result)
                 }
             };
 
-            Ok(value)
+            Ok((value, Heap::new()))
         } else {
             // Legacy single-function path for backwards compatibility
             let jit_ret_type = match result_type {
@@ -140,25 +140,25 @@ impl Runtime {
                         let func: fn() -> f64 = std::mem::transmute(ptr);
                         func()
                     };
-                    Value::Float(result)
+                    Value::float(result)
                 }
                 Some(Type::Boolean) => {
                     let result: i64 = unsafe {
                         let func: fn() -> i64 = std::mem::transmute(ptr);
                         func()
                     };
-                    Value::Bool(result != 0)
+                    Value::bool(result != 0)
                 }
                 _ => {
                     let result: i64 = unsafe {
                         let func: fn() -> i64 = std::mem::transmute(ptr);
                         func()
                     };
-                    Value::Int(result)
+                    Value::int(result)
                 }
             };
 
-            Ok(value)
+            Ok((value, Heap::new()))
         }
     }
 
@@ -167,7 +167,7 @@ impl Runtime {
         mir_module: &mir::Module,
         _hir: &LowerResult,
         _inferred: &InferenceResult,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<(Value, Heap), RuntimeError> {
         // For now, tiered mode just uses VM since we don't have functions yet.
         // When functions are added, this will:
         // 1. Execute via VM

@@ -1,13 +1,10 @@
 //! Virtual machine state and execution.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use compile::{Chunk, CompiledModule, ConstIdx, Instruction, Slot};
 
 use crate::error::RuntimeError;
 use crate::frame::CallFrame;
-use crate::value::{ClosureValue, Value};
+use crate::value::{Heap, Value};
 
 /// Pre-allocated stack capacity (slots)
 const STACK_CAPACITY: usize = 8192;
@@ -18,6 +15,8 @@ const FRAMES_CAPACITY: usize = 256;
 pub struct Vm<'a> {
     /// Unified value stack (locals + temps for all frames)
     stack: Vec<Value>,
+    /// Heap for strings and closures
+    heap: Heap,
     /// Call frame stack
     frames: Vec<CallFrame>,
     chunks: &'a [Chunk],
@@ -32,15 +31,16 @@ impl<'a> Vm<'a> {
         let frame_size = main.local_count as usize + main.register_count as usize;
 
         let mut stack = Vec::with_capacity(STACK_CAPACITY);
-        stack.resize(frame_size, Value::Unit);
+        stack.resize(frame_size, Value::unit());
 
         Self {
             stack,
+            heap: Heap::new(),
             frames: Vec::with_capacity(FRAMES_CAPACITY),
             chunks: &module.chunks,
             current_chunk: module.main_idx,
             pc: 0,
-            last_value: Value::Unit,
+            last_value: Value::unit(),
         }
     }
 
@@ -58,10 +58,10 @@ impl<'a> Vm<'a> {
 
     /// Get value at slot (unchecked in release)
     #[inline]
-    fn get(&self, slot: Slot) -> &Value {
+    fn get(&self, slot: Slot) -> Value {
         let idx = self.slot_idx(slot);
         debug_assert!(idx < self.stack.len(), "slot {} out of bounds", slot.0);
-        unsafe { self.stack.get_unchecked(idx) }
+        unsafe { *self.stack.get_unchecked(idx) }
     }
 
     /// Set value at slot (unchecked in release)
@@ -75,52 +75,45 @@ impl<'a> Vm<'a> {
     /// Get int from slot
     #[inline]
     fn get_int(&self, slot: Slot) -> Result<i64, RuntimeError> {
-        match self.get(slot) {
-            Value::Int(n) => Ok(*n),
-            v => Err(RuntimeError::TypeMismatch {
-                expected: "Int",
-                got: v.type_name(),
-            }),
-        }
+        let val = self.get(slot);
+        val.as_int().ok_or(RuntimeError::TypeMismatch {
+            expected: "Int",
+            got: val.type_name(),
+        })
     }
 
     /// Get float from slot
     #[inline]
     fn get_float(&self, slot: Slot) -> Result<f64, RuntimeError> {
-        match self.get(slot) {
-            Value::Float(n) => Ok(*n),
-            v => Err(RuntimeError::TypeMismatch {
-                expected: "Float",
-                got: v.type_name(),
-            }),
-        }
+        let val = self.get(slot);
+        val.as_float().ok_or(RuntimeError::TypeMismatch {
+            expected: "Float",
+            got: val.type_name(),
+        })
     }
 
     /// Get bool from slot
     #[inline]
     fn get_bool(&self, slot: Slot) -> Result<bool, RuntimeError> {
-        match self.get(slot) {
-            Value::Bool(b) => Ok(*b),
-            v => Err(RuntimeError::TypeMismatch {
-                expected: "Bool",
-                got: v.type_name(),
-            }),
-        }
+        let val = self.get(slot);
+        val.as_bool().ok_or(RuntimeError::TypeMismatch {
+            expected: "Bool",
+            got: val.type_name(),
+        })
     }
 
-    /// Get closure from slot
+    /// Get closure index from slot
     #[inline]
-    fn get_closure(&self, slot: Slot) -> Result<ClosureValue, RuntimeError> {
-        match self.get(slot) {
-            Value::Closure(c) => Ok(c.clone()),
-            _ => Err(RuntimeError::NotAClosure),
-        }
+    fn get_closure_idx(&self, slot: Slot) -> Result<u32, RuntimeError> {
+        let val = self.get(slot);
+        val.as_closure_idx().ok_or(RuntimeError::NotAClosure)
     }
 
-    fn current_closure_env(&self) -> Result<&Rc<RefCell<Vec<Value>>>, RuntimeError> {
+    /// Get current frame's closure index
+    fn current_closure_idx(&self) -> Result<u32, RuntimeError> {
         self.frames
             .last()
-            .and_then(|f| f.closure_env.as_ref())
+            .and_then(|f| f.closure_idx)
             .ok_or(RuntimeError::NoClosure)
     }
 
@@ -130,7 +123,7 @@ impl<'a> Vm<'a> {
         func_idx: usize,
         arg_base: Slot,
         arg_count: u8,
-        closure_env: Option<Rc<RefCell<Vec<Value>>>>,
+        closure_idx: Option<u32>,
     ) -> Result<(), RuntimeError> {
         let chunk = self
             .chunks
@@ -144,12 +137,12 @@ impl<'a> Vm<'a> {
         let new_frame_size = chunk.local_count as usize + chunk.register_count as usize;
 
         // Extend stack for new frame
-        self.stack.resize(new_base + new_frame_size, Value::Unit);
+        self.stack.resize(new_base + new_frame_size, Value::unit());
 
         // Copy args to new frame's locals (slots 0..arg_count)
         let arg_start = caller_base + arg_base.0 as usize;
         for i in 0..arg_count as usize {
-            self.stack[new_base + i] = self.stack[arg_start + i].clone();
+            self.stack[new_base + i] = self.stack[arg_start + i];
         }
 
         // Compute result slot relative to caller's base
@@ -161,7 +154,7 @@ impl<'a> Vm<'a> {
             return_chunk: self.current_chunk,
             stack_base: new_base,
             result_slot,
-            closure_env,
+            closure_idx,
         });
 
         self.current_chunk = func_idx;
@@ -170,8 +163,8 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
-    /// Execute the VM until completion.
-    pub fn execute(&mut self) -> Result<Value, RuntimeError> {
+    /// Execute the VM until completion. Returns (result, heap) to allow displaying heap values.
+    pub fn execute(mut self) -> Result<(Value, Heap), RuntimeError> {
         loop {
             let chunk = &self.chunks[self.current_chunk];
             if self.pc >= chunk.instructions.len() {
@@ -184,152 +177,154 @@ impl<'a> Vm<'a> {
             match inst {
                 // Loads
                 Instruction::LoadInt { dst, value } => {
-                    self.set(dst, Value::Int(value));
-                    self.last_value = Value::Int(value);
+                    let val = Value::int(value);
+                    self.set(dst, val);
+                    self.last_value = val;
                 }
                 Instruction::LoadBool { dst, value } => {
-                    self.set(dst, Value::Bool(value));
-                    self.last_value = Value::Bool(value);
+                    let val = Value::bool(value);
+                    self.set(dst, val);
+                    self.last_value = val;
                 }
                 Instruction::LoadConst { dst, idx } => {
-                    let val = load_const(&chunk.constants, idx)?;
-                    self.last_value = val.clone();
+                    let val = self.load_const(&chunk.constants, idx)?;
+                    self.last_value = val;
                     self.set(dst, val);
                 }
 
                 // Move
                 Instruction::Move { dst, src } => {
-                    let val = self.get(src).clone();
-                    self.last_value = val.clone();
+                    let val = self.get(src);
+                    self.last_value = val;
                     self.set(dst, val);
                 }
 
                 // Integer arithmetic
                 Instruction::AddInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? + self.get_int(rhs)?;
-                    self.set(dst, Value::Int(result));
-                    self.last_value = Value::Int(result);
+                    let result = Value::int(self.get_int(lhs)? + self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::SubInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? - self.get_int(rhs)?;
-                    self.set(dst, Value::Int(result));
-                    self.last_value = Value::Int(result);
+                    let result = Value::int(self.get_int(lhs)? - self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::MulInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? * self.get_int(rhs)?;
-                    self.set(dst, Value::Int(result));
-                    self.last_value = Value::Int(result);
+                    let result = Value::int(self.get_int(lhs)? * self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::DivInt { dst, lhs, rhs } => {
                     let divisor = self.get_int(rhs)?;
                     if divisor == 0 {
                         return Err(RuntimeError::DivisionByZero);
                     }
-                    let result = self.get_int(lhs)? / divisor;
-                    self.set(dst, Value::Int(result));
-                    self.last_value = Value::Int(result);
+                    let result = Value::int(self.get_int(lhs)? / divisor);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::ModInt { dst, lhs, rhs } => {
                     let divisor = self.get_int(rhs)?;
                     if divisor == 0 {
                         return Err(RuntimeError::DivisionByZero);
                     }
-                    let result = self.get_int(lhs)? % divisor;
-                    self.set(dst, Value::Int(result));
-                    self.last_value = Value::Int(result);
+                    let result = Value::int(self.get_int(lhs)? % divisor);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::NegInt { dst, src } => {
-                    let result = -self.get_int(src)?;
-                    self.set(dst, Value::Int(result));
-                    self.last_value = Value::Int(result);
+                    let result = Value::int(-self.get_int(src)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
 
                 // Float arithmetic
                 Instruction::AddFloat { dst, lhs, rhs } => {
-                    let result = self.get_float(lhs)? + self.get_float(rhs)?;
-                    self.set(dst, Value::Float(result));
-                    self.last_value = Value::Float(result);
+                    let result = Value::float(self.get_float(lhs)? + self.get_float(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::SubFloat { dst, lhs, rhs } => {
-                    let result = self.get_float(lhs)? - self.get_float(rhs)?;
-                    self.set(dst, Value::Float(result));
-                    self.last_value = Value::Float(result);
+                    let result = Value::float(self.get_float(lhs)? - self.get_float(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::MulFloat { dst, lhs, rhs } => {
-                    let result = self.get_float(lhs)? * self.get_float(rhs)?;
-                    self.set(dst, Value::Float(result));
-                    self.last_value = Value::Float(result);
+                    let result = Value::float(self.get_float(lhs)? * self.get_float(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::DivFloat { dst, lhs, rhs } => {
-                    let result = self.get_float(lhs)? / self.get_float(rhs)?;
-                    self.set(dst, Value::Float(result));
-                    self.last_value = Value::Float(result);
+                    let result = Value::float(self.get_float(lhs)? / self.get_float(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::NegFloat { dst, src } => {
-                    let result = -self.get_float(src)?;
-                    self.set(dst, Value::Float(result));
-                    self.last_value = Value::Float(result);
+                    let result = Value::float(-self.get_float(src)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
 
                 // Integer comparisons
                 Instruction::EqInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? == self.get_int(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_int(lhs)? == self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::NeInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? != self.get_int(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_int(lhs)? != self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::LtInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? < self.get_int(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_int(lhs)? < self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::LeInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? <= self.get_int(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_int(lhs)? <= self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::GtInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? > self.get_int(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_int(lhs)? > self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::GeInt { dst, lhs, rhs } => {
-                    let result = self.get_int(lhs)? >= self.get_int(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_int(lhs)? >= self.get_int(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
 
                 // Float comparisons
                 Instruction::LtFloat { dst, lhs, rhs } => {
-                    let result = self.get_float(lhs)? < self.get_float(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_float(lhs)? < self.get_float(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::LeFloat { dst, lhs, rhs } => {
-                    let result = self.get_float(lhs)? <= self.get_float(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_float(lhs)? <= self.get_float(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::GtFloat { dst, lhs, rhs } => {
-                    let result = self.get_float(lhs)? > self.get_float(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_float(lhs)? > self.get_float(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
                 Instruction::GeFloat { dst, lhs, rhs } => {
-                    let result = self.get_float(lhs)? >= self.get_float(rhs)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(self.get_float(lhs)? >= self.get_float(rhs)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
 
                 // Boolean
                 Instruction::Not { dst, src } => {
-                    let result = !self.get_bool(src)?;
-                    self.set(dst, Value::Bool(result));
-                    self.last_value = Value::Bool(result);
+                    let result = Value::bool(!self.get_bool(src)?);
+                    self.set(dst, result);
+                    self.last_value = result;
                 }
 
                 // Control flow
@@ -363,20 +358,15 @@ impl<'a> Vm<'a> {
                     arg_base,
                     arg_count,
                 } => {
-                    let closure = self.get_closure(callee)?;
-                    self.do_call(
-                        dst,
-                        closure.func_idx,
-                        arg_base,
-                        arg_count,
-                        Some(closure.env.clone()),
-                    )?;
+                    let closure_idx = self.get_closure_idx(callee)?;
+                    let func_idx = self.heap.get_closure(closure_idx).func_idx as usize;
+                    self.do_call(dst, func_idx, arg_base, arg_count, Some(closure_idx))?;
                 }
 
                 Instruction::Return { src } => {
                     let result = match src {
-                        Some(s) => self.get(s).clone(),
-                        None => Value::Unit,
+                        Some(s) => self.get(s),
+                        None => Value::unit(),
                     };
 
                     if let Some(frame) = self.frames.pop() {
@@ -393,7 +383,7 @@ impl<'a> Vm<'a> {
                         // Store result in caller's slot
                         if let Some(slot) = frame.result_slot {
                             let idx = caller_base + slot as usize;
-                            self.stack[idx] = result.clone();
+                            self.stack[idx] = result;
                         }
                         self.last_value = result;
                     } else {
@@ -411,35 +401,33 @@ impl<'a> Vm<'a> {
                     capture_count,
                 } => {
                     let base = self.stack_base();
-                    let mut env = Vec::with_capacity(capture_count as usize);
+                    let mut captures = Vec::with_capacity(capture_count as usize);
                     for i in 0..capture_count {
                         let idx = base + capture_base.0 as usize + i as usize;
-                        env.push(self.stack[idx].clone());
+                        captures.push(self.stack[idx]);
                     }
 
-                    let closure = ClosureValue {
-                        func_idx: func_idx.0 as usize,
-                        env: Rc::new(RefCell::new(env)),
-                    };
-                    self.set(dst, Value::Closure(closure));
+                    let closure_idx = self.heap.alloc_closure(func_idx.0, captures);
+                    self.set(dst, Value::closure(closure_idx));
                 }
 
                 Instruction::LoadCapture { dst, index } => {
-                    let env = self.current_closure_env()?;
-                    let val = env
-                        .borrow()
+                    let closure_idx = self.current_closure_idx()?;
+                    let closure = self.heap.get_closure(closure_idx);
+                    let val = closure
+                        .captures
                         .get(index as usize)
-                        .cloned()
+                        .map(|c| c.get())
                         .ok_or(RuntimeError::CaptureOutOfBounds(index))?;
                     self.set(dst, val);
                 }
 
                 Instruction::StoreCapture { index, src } => {
-                    let val = self.get(src).clone();
-                    let env = self.current_closure_env()?;
-                    let mut env_mut = env.borrow_mut();
-                    if (index as usize) < env_mut.len() {
-                        env_mut[index as usize] = val;
+                    let val = self.get(src);
+                    let closure_idx = self.current_closure_idx()?;
+                    let closure = self.heap.get_closure(closure_idx);
+                    if (index as usize) < closure.captures.len() {
+                        closure.captures[index as usize].set(val);
                     } else {
                         return Err(RuntimeError::CaptureOutOfBounds(index));
                     }
@@ -448,7 +436,7 @@ impl<'a> Vm<'a> {
                 // I/O
                 Instruction::Echo { src } => {
                     let val = self.get(src);
-                    println!("{}", val);
+                    println!("{}", val.display(&self.heap));
                 }
 
                 // End
@@ -458,14 +446,21 @@ impl<'a> Vm<'a> {
             }
         }
 
-        Ok(self.last_value.clone())
+        Ok((self.last_value, self.heap))
     }
-}
 
-fn load_const(pool: &compile::ConstantPool, idx: ConstIdx) -> Result<Value, RuntimeError> {
-    match pool.get(idx) {
-        Some(compile::Constant::Float(f)) => Ok(Value::Float(*f)),
-        Some(compile::Constant::String(s)) => Ok(Value::String(s.clone())),
-        None => Err(RuntimeError::InvalidConstant(idx.0)),
+    fn load_const(
+        &mut self,
+        pool: &compile::ConstantPool,
+        idx: ConstIdx,
+    ) -> Result<Value, RuntimeError> {
+        match pool.get(idx) {
+            Some(compile::Constant::Float(f)) => Ok(Value::float(*f)),
+            Some(compile::Constant::String(s)) => {
+                let str_idx = self.heap.alloc_string(s.clone());
+                Ok(Value::string(str_idx))
+            }
+            None => Err(RuntimeError::InvalidConstant(idx.0)),
+        }
     }
 }
