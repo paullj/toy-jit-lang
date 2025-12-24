@@ -26,7 +26,7 @@ pub enum ExecutionMode {
 }
 
 /// Runtime value (re-exported from vm)
-pub use vm::{Heap, Value};
+pub use vm::{GcStats, Heap, Value};
 
 /// Runtime error
 #[derive(Debug, Error)]
