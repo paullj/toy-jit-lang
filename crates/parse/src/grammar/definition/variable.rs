@@ -28,5 +28,22 @@ pub(crate) fn variable_definition_typed(p: &mut Parser, m: Marker) -> CompletedM
 pub(crate) fn type_annotation(p: &mut Parser) -> CompletedMarker {
     let m = p.start();
     p.expect(TokenKind::Identifier, "type name");
+
+    // Check for generic: list[Type]
+    if p.at(TokenKind::LeftBracket) {
+        p.consume(); // eat '['
+        type_annotation(p); // recursive for nested: list[list[int]]
+        if !p.eat(TokenKind::RightBracket) {
+            let span = p.current_span();
+            let found = p.current().map(|k| k.to_string());
+            p.error(crate::ParseError::UnexpectedToken {
+                at: span.into(),
+                expected: "']'".to_string(),
+                found,
+            });
+        }
+        return m.complete(p, SyntaxKind::ListType);
+    }
+
     m.complete(p, SyntaxKind::TypeAnnotation)
 }

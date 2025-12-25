@@ -280,5 +280,7 @@ fn get_expr_type(expr: &Expression, hir: &LowerResult, inferred: &InferenceResul
         Expression::While { .. } => Type::Unit,
         Expression::Break { .. } => Type::Unit,
         Expression::Continue { .. } => Type::Unit,
+        // List expressions - type comes from inference
+        Expression::List { .. } | Expression::Index { .. } | Expression::Slice { .. } => Type::Unit,
     }
 }

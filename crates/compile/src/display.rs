@@ -80,6 +80,21 @@ impl fmt::Display for Instruction {
 
             Instruction::Echo { src } => write!(f, "echo {}", src),
 
+            // List operations
+            Instruction::ListNew { dst, capacity } => write!(f, "list.new {} {}", dst, capacity),
+            Instruction::ListSet { list, index, value } => {
+                write!(f, "list.set {} {} {}", list, index, value)
+            }
+            Instruction::ListGet { dst, list, index } => {
+                write!(f, "list.get {} {} {}", dst, list, index)
+            }
+            Instruction::ListSlice {
+                dst,
+                list,
+                start,
+                end,
+            } => write!(f, "list.slice {} {} {} {}", dst, list, start, end),
+
             Instruction::Halt => write!(f, "halt"),
         }
     }

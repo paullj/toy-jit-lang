@@ -125,6 +125,18 @@ pub enum Expression {
     Continue {
         label: Option<Ident>,
     },
+    List {
+        elements: Vec<ExprIdx>,
+    },
+    Index {
+        collection: ExprIdx,
+        index: ExprIdx,
+    },
+    Slice {
+        collection: ExprIdx,
+        start: Option<ExprIdx>,
+        end: Option<ExprIdx>,
+    },
 }
 
 /// Item inside a block expression

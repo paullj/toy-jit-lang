@@ -189,7 +189,10 @@ impl<'a> FunctionTranslator<'a> {
             | Inst::Copy { dst, .. }
             | Inst::LoadLocal { dst, .. }
             | Inst::LoadCapture { dst, .. }
-            | Inst::MakeClosure { dst, .. } => Some(*dst),
+            | Inst::MakeClosure { dst, .. }
+            | Inst::ListNew { dst, .. }
+            | Inst::ListGet { dst, .. }
+            | Inst::ListSlice { dst, .. } => Some(*dst),
             Inst::Call { dst, .. } | Inst::CallIndirect { dst, .. } => *dst,
             _ => None,
         }
@@ -531,6 +534,13 @@ impl<'a> FunctionTranslator<'a> {
             }
             Inst::Echo { .. } => {
                 // Not supported in JIT yet
+            }
+            // List operations - not yet supported in JIT, requires runtime helpers
+            Inst::ListNew { .. }
+            | Inst::ListSet { .. }
+            | Inst::ListGet { .. }
+            | Inst::ListSlice { .. } => {
+                unimplemented!("list operations not yet supported in JIT");
             }
         }
     }
@@ -964,6 +974,13 @@ impl<'a> FunctionTranslator<'a> {
             Inst::Echo { src } => {
                 // TODO: Implement echo in JIT (would need runtime call)
                 let _ = src;
+            }
+            // List operations - not yet supported in JIT, requires runtime helpers
+            Inst::ListNew { .. }
+            | Inst::ListSet { .. }
+            | Inst::ListGet { .. }
+            | Inst::ListSlice { .. } => {
+                unimplemented!("list operations not yet supported in JIT");
             }
         }
     }

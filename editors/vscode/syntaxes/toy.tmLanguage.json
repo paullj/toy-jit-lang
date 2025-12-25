@@ -30,12 +30,24 @@
       "name": "punctuation.brace.close.toy"
     },
     {
+      "match": "\\[",
+      "name": "punctuation.bracket.open.toy"
+    },
+    {
+      "match": "\\]",
+      "name": "punctuation.bracket.close.toy"
+    },
+    {
       "match": ",",
       "name": "punctuation.comma.toy"
     },
     {
       "match": ":",
       "name": "punctuation.colon.toy"
+    },
+    {
+      "match": "\\.\\.",
+      "name": "keyword.operator.range.toy"
     },
     {
       "match": "\\+",

@@ -112,6 +112,26 @@ impl<'a> Vm<'a> {
         val.as_closure_idx().ok_or(RuntimeError::NotAClosure)
     }
 
+    /// Get list index from slot
+    #[inline(always)]
+    fn get_list_idx(&self, base: usize, slot: Slot) -> Result<u32, RuntimeError> {
+        let val = self.get(base, slot);
+        val.as_list_idx().ok_or(RuntimeError::TypeMismatch {
+            expected: "List",
+            got: val.type_name(),
+        })
+    }
+
+    /// Normalize list index (handle negative indexing)
+    #[inline(always)]
+    fn normalize_index(index: i64, len: usize) -> Result<usize, RuntimeError> {
+        let normalized = if index < 0 { len as i64 + index } else { index };
+        if normalized < 0 || normalized as usize >= len {
+            return Err(RuntimeError::IndexOutOfBounds { index, len });
+        }
+        Ok(normalized as usize)
+    }
+
     /// Get current frame's closure index
     fn current_closure_idx(&self) -> Result<u32, RuntimeError> {
         self.frames
@@ -454,6 +474,82 @@ impl<'a> Vm<'a> {
                 Instruction::Echo { src } => {
                     let val = self.get(base, src);
                     println!("{}", val.display_with_interner(&self.heap, self.strings));
+                }
+
+                // List operations
+                Instruction::ListNew { dst, capacity } => {
+                    self.maybe_gc();
+                    let list_idx = self.heap.alloc_list(capacity as usize);
+                    let result = Value::list(list_idx);
+                    self.set(base, dst, result);
+                    self.last_value = result;
+                }
+
+                Instruction::ListSet { list, index, value } => {
+                    let list_idx = self.get_list_idx(base, list)?;
+                    let idx = self.get_int(base, index)?;
+                    let val = self.get(base, value);
+
+                    let list_data = self.heap.get_list_mut(list_idx);
+                    let len = list_data.elements.len();
+                    let normalized = Self::normalize_index(idx, len)?;
+                    list_data.elements[normalized] = val;
+                }
+
+                Instruction::ListGet { dst, list, index } => {
+                    let list_idx = self.get_list_idx(base, list)?;
+                    let idx = self.get_int(base, index)?;
+
+                    let list_data = self.heap.get_list(list_idx);
+                    let len = list_data.elements.len();
+                    let normalized = Self::normalize_index(idx, len)?;
+                    let result = list_data.elements[normalized];
+                    self.set(base, dst, result);
+                    self.last_value = result;
+                }
+
+                Instruction::ListSlice {
+                    dst,
+                    list,
+                    start,
+                    end,
+                } => {
+                    self.maybe_gc();
+                    let list_idx = self.get_list_idx(base, list)?;
+                    let start_val = self.get_int(base, start)?;
+                    let end_val = self.get_int(base, end)?;
+
+                    let list_data = self.heap.get_list(list_idx);
+                    let len = list_data.elements.len();
+
+                    // i64::MIN is sentinel for "missing"
+                    let start_idx = if start_val == i64::MIN {
+                        0
+                    } else if start_val < 0 {
+                        (len as i64 + start_val).max(0) as usize
+                    } else {
+                        (start_val as usize).min(len)
+                    };
+
+                    let end_idx = if end_val == i64::MIN {
+                        len
+                    } else if end_val < 0 {
+                        (len as i64 + end_val).max(0) as usize
+                    } else {
+                        (end_val as usize).min(len)
+                    };
+
+                    let slice: Vec<Value> = if start_idx < end_idx {
+                        list_data.elements[start_idx..end_idx].to_vec()
+                    } else {
+                        Vec::new()
+                    };
+
+                    let new_list_idx = self.heap.alloc_list(slice.len());
+                    self.heap.get_list_mut(new_list_idx).elements = slice;
+                    let result = Value::list(new_list_idx);
+                    self.set(base, dst, result);
+                    self.last_value = result;
                 }
 
                 // End

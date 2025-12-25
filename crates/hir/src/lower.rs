@@ -370,6 +370,9 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
         ast::Expression::While(while_expr) => lower_while(ctx, while_expr),
         ast::Expression::Function(fn_expr) => lower_function_expr(ctx, fn_expr),
         ast::Expression::Call(call) => lower_call(ctx, call),
+        ast::Expression::List(list) => lower_list(ctx, list),
+        ast::Expression::Index(index) => lower_index(ctx, index),
+        ast::Expression::Slice(slice) => lower_slice(ctx, slice),
     }
 }
 
@@ -417,6 +420,70 @@ fn lower_call(ctx: &mut Ctx, call: ast::CallExpression) -> Expression {
         .collect();
 
     Expression::Call { callee, args }
+}
+
+fn lower_list(ctx: &mut Ctx, list: ast::ListExpression) -> Expression {
+    let elements: Vec<ExprIdx> = list
+        .elements()
+        .map(|e| {
+            let span = e.syntax().text_range();
+            let expr = lower_expression(ctx, Some(e));
+            ctx.alloc(expr, span)
+        })
+        .collect();
+
+    Expression::List { elements }
+}
+
+fn lower_index(ctx: &mut Ctx, index: ast::IndexExpression) -> Expression {
+    let coll_ast = index.collection();
+    let coll_span = coll_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let coll_expr = lower_expression(ctx, coll_ast);
+    let collection = ctx.alloc(coll_expr, coll_span);
+
+    let idx_ast = index.index();
+    let idx_span = idx_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let idx_expr = lower_expression(ctx, idx_ast);
+    let index_idx = ctx.alloc(idx_expr, idx_span);
+
+    Expression::Index {
+        collection,
+        index: index_idx,
+    }
+}
+
+fn lower_slice(ctx: &mut Ctx, slice: ast::SliceExpression) -> Expression {
+    let coll_ast = slice.collection();
+    let coll_span = coll_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let coll_expr = lower_expression(ctx, coll_ast);
+    let collection = ctx.alloc(coll_expr, coll_span);
+
+    let start = slice.start().map(|e| {
+        let span = e.syntax().text_range();
+        let expr = lower_expression(ctx, Some(e));
+        ctx.alloc(expr, span)
+    });
+
+    let end = slice.end().map(|e| {
+        let span = e.syntax().text_range();
+        let expr = lower_expression(ctx, Some(e));
+        ctx.alloc(expr, span)
+    });
+
+    Expression::Slice {
+        collection,
+        start,
+        end,
+    }
 }
 
 fn lower_infix(ctx: &mut Ctx, ast: ast::InfixExpression) -> Expression {

@@ -32,6 +32,7 @@ impl Subst {
                 params: params.iter().map(|p| self.apply(p)).collect(),
                 ret: Box::new(self.apply(ret)),
             },
+            Type::List(elem) => Type::List(Box::new(self.apply(elem))),
             _ => ty.clone(),
         }
     }

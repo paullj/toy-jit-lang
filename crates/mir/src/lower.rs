@@ -548,6 +548,13 @@ impl<'a> LowerCtx<'a> {
                 }
                 Operand::IntConst(0)
             }
+            Expression::List { elements } => self.lower_list(elements),
+            Expression::Index { collection, index } => self.lower_index(*collection, *index),
+            Expression::Slice {
+                collection,
+                start,
+                end,
+            } => self.lower_slice(*collection, *start, *end),
         }
     }
 
@@ -876,6 +883,63 @@ impl<'a> LowerCtx<'a> {
         // Exit block
         self.switch_to_block(exit_bb);
         Operand::IntConst(0)
+    }
+
+    fn lower_list(&mut self, elements: &[ExprIdx]) -> Operand {
+        let dst = self.fresh_vreg();
+
+        // Create new list with capacity
+        self.emit(Inst::ListNew {
+            dst,
+            capacity: elements.len() as u32,
+        });
+
+        // Set each element
+        for (i, elem_idx) in elements.iter().enumerate() {
+            let value = self.lower_expr_idx(*elem_idx);
+            self.emit(Inst::ListSet {
+                list: Operand::VReg(dst),
+                index: Operand::IntConst(i as i64),
+                value,
+            });
+        }
+
+        Operand::VReg(dst)
+    }
+
+    fn lower_index(&mut self, collection: ExprIdx, index: ExprIdx) -> Operand {
+        let list = self.lower_expr_idx(collection);
+        let idx = self.lower_expr_idx(index);
+        let dst = self.fresh_vreg();
+
+        self.emit(Inst::ListGet {
+            dst,
+            list,
+            index: idx,
+        });
+
+        Operand::VReg(dst)
+    }
+
+    fn lower_slice(
+        &mut self,
+        collection: ExprIdx,
+        start: Option<ExprIdx>,
+        end: Option<ExprIdx>,
+    ) -> Operand {
+        let list = self.lower_expr_idx(collection);
+        let start_op = start.map(|s| self.lower_expr_idx(s));
+        let end_op = end.map(|e| self.lower_expr_idx(e));
+        let dst = self.fresh_vreg();
+
+        self.emit(Inst::ListSlice {
+            dst,
+            list,
+            start: start_op,
+            end: end_op,
+        });
+
+        Operand::VReg(dst)
     }
 
     fn finish(self) -> Module {

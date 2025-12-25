@@ -825,4 +825,237 @@ mod tests {
             "#]],
         );
     }
+
+    // ========================================
+    // List expression tests
+    // ========================================
+
+    #[test]
+    fn parse_list_literal() {
+        check(
+            "x := [1, 2, 3]",
+            expect![[r#"
+                Root@0..14
+                  VariableDefinition@0..14
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    ListExpression@4..14
+                      Whitespace@4..5 " "
+                      LeftBracket@5..6 "["
+                      Literal@6..7
+                        Integer@6..7 "1"
+                      Comma@7..8 ","
+                      Literal@8..10
+                        Whitespace@8..9 " "
+                        Integer@9..10 "2"
+                      Comma@10..11 ","
+                      Literal@11..13
+                        Whitespace@11..12 " "
+                        Integer@12..13 "3"
+                      RightBracket@13..14 "]"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_empty_list() {
+        check(
+            "x := []",
+            expect![[r#"
+                Root@0..7
+                  VariableDefinition@0..7
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    ListExpression@4..7
+                      Whitespace@4..5 " "
+                      LeftBracket@5..6 "["
+                      RightBracket@6..7 "]"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_index_expression() {
+        check(
+            "x := arr[0]",
+            expect![[r#"
+                Root@0..11
+                  VariableDefinition@0..11
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    IndexExpression@4..11
+                      VariableReference@4..8
+                        Whitespace@4..5 " "
+                        Identifier@5..8 "arr"
+                      LeftBracket@8..9 "["
+                      Literal@9..10
+                        Integer@9..10 "0"
+                      RightBracket@10..11 "]"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_slice_expression_full() {
+        check(
+            "x := arr[1..3]",
+            expect![[r#"
+                Root@0..14
+                  VariableDefinition@0..14
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    SliceExpression@4..14
+                      VariableReference@4..8
+                        Whitespace@4..5 " "
+                        Identifier@5..8 "arr"
+                      LeftBracket@8..9 "["
+                      Literal@9..10
+                        Integer@9..10 "1"
+                      DotDot@10..12 ".."
+                      Literal@12..13
+                        Integer@12..13 "3"
+                      RightBracket@13..14 "]"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_slice_expression_from_start() {
+        check(
+            "x := arr[..3]",
+            expect![[r#"
+                Root@0..13
+                  VariableDefinition@0..13
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    SliceExpression@4..13
+                      VariableReference@4..8
+                        Whitespace@4..5 " "
+                        Identifier@5..8 "arr"
+                      LeftBracket@8..9 "["
+                      DotDot@9..11 ".."
+                      Literal@11..12
+                        Integer@11..12 "3"
+                      RightBracket@12..13 "]"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_slice_expression_to_end() {
+        check(
+            "x := arr[1..]",
+            expect![[r#"
+                Root@0..13
+                  VariableDefinition@0..13
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    SliceExpression@4..13
+                      VariableReference@4..8
+                        Whitespace@4..5 " "
+                        Identifier@5..8 "arr"
+                      LeftBracket@8..9 "["
+                      Literal@9..10
+                        Integer@9..10 "1"
+                      DotDot@10..12 ".."
+                      RightBracket@12..13 "]"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_list_type_annotation() {
+        check(
+            "x: list[int] = []",
+            expect![[r#"
+                Root@0..17
+                  VariableDefinition@0..17
+                    Identifier@0..1 "x"
+                    Colon@1..2 ":"
+                    ListType@2..12
+                      Whitespace@2..3 " "
+                      Identifier@3..7 "list"
+                      LeftBracket@7..8 "["
+                      TypeAnnotation@8..11
+                        Identifier@8..11 "int"
+                      RightBracket@11..12 "]"
+                    Whitespace@12..13 " "
+                    Equals@13..14 "="
+                    ListExpression@14..17
+                      Whitespace@14..15 " "
+                      LeftBracket@15..16 "["
+                      RightBracket@16..17 "]"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_nested_list_type() {
+        check(
+            "x: list[list[int]] = []",
+            expect![[r#"
+                Root@0..23
+                  VariableDefinition@0..23
+                    Identifier@0..1 "x"
+                    Colon@1..2 ":"
+                    ListType@2..18
+                      Whitespace@2..3 " "
+                      Identifier@3..7 "list"
+                      LeftBracket@7..8 "["
+                      ListType@8..17
+                        Identifier@8..12 "list"
+                        LeftBracket@12..13 "["
+                        TypeAnnotation@13..16
+                          Identifier@13..16 "int"
+                        RightBracket@16..17 "]"
+                      RightBracket@17..18 "]"
+                    Whitespace@18..19 " "
+                    Equals@19..20 "="
+                    ListExpression@20..23
+                      Whitespace@20..21 " "
+                      LeftBracket@21..22 "["
+                      RightBracket@22..23 "]"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_chained_index() {
+        check(
+            "x := arr[0][1]",
+            expect![[r#"
+                Root@0..14
+                  VariableDefinition@0..14
+                    Identifier@0..1 "x"
+                    Whitespace@1..2 " "
+                    Colon@2..3 ":"
+                    Equals@3..4 "="
+                    IndexExpression@4..14
+                      IndexExpression@4..11
+                        VariableReference@4..8
+                          Whitespace@4..5 " "
+                          Identifier@5..8 "arr"
+                        LeftBracket@8..9 "["
+                        Literal@9..10
+                          Integer@9..10 "0"
+                        RightBracket@10..11 "]"
+                      LeftBracket@11..12 "["
+                      Literal@12..13
+                        Integer@12..13 "1"
+                      RightBracket@13..14 "]"
+            "#]],
+        );
+    }
 }

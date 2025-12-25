@@ -44,12 +44,10 @@ toy is a simple programming language that is made for fun.
 
 * clean up
   * maybe make cli just a cli and move all the logic elsewhere
-
-* control flow
-  * loops
-    * while
-    * for x in y
-    * loop
+  * review docs
+    * make it read better
+    * add more examples
+    * unsure if i should make the docs have useful examples or just focus on language features
 
 * tiered execution
   * interpret code first
@@ -57,11 +55,19 @@ toy is a simple programming language that is made for fun.
   * jit compile hot paths
 
 * garbage collection improvements
+  * but what?
 
+* lists
+* for loops
 * structs
 * tuples
 * enums
 * traits / interfaces
+
+* exceptions / error handling
+  * try/catch
+  * result type
+  * option type
 
 * pattern matching
 

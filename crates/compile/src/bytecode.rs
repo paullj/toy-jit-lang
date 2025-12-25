@@ -238,6 +238,33 @@ pub enum Instruction {
         src: Slot,
     },
 
+    // List operations
+    /// Create a new list with given capacity
+    ListNew {
+        dst: Slot,
+        capacity: u32,
+    },
+    /// Set element in list: list[index] = value
+    ListSet {
+        list: Slot,
+        index: Slot,
+        value: Slot,
+    },
+    /// Get element from list: dst = list[index]
+    ListGet {
+        dst: Slot,
+        list: Slot,
+        index: Slot,
+    },
+    /// Slice a list: dst = list[start..end]
+    /// Uses i64::MIN as sentinel for "missing" start/end
+    ListSlice {
+        dst: Slot,
+        list: Slot,
+        start: Slot,
+        end: Slot,
+    },
+
     // End
     Halt,
 }

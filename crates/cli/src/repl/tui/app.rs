@@ -327,6 +327,10 @@ fn get_expr_type(
         hir::Expression::While { .. } => infer::Type::Unit,
         hir::Expression::Break { .. } => infer::Type::Unit,
         hir::Expression::Continue { .. } => infer::Type::Unit,
+        // List expressions - type comes from inference
+        hir::Expression::List { .. }
+        | hir::Expression::Index { .. }
+        | hir::Expression::Slice { .. } => infer::Type::Unit,
     }
 }
 

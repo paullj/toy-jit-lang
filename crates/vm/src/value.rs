@@ -16,6 +16,7 @@ pub enum ValueTag {
     InternedString = 4,
     DynamicString = 5,
     Closure = 6,
+    List = 7,
 }
 
 /// Compact 16-byte runtime value.
@@ -97,6 +98,15 @@ impl Value {
     }
 
     #[inline]
+    pub const fn list(idx: u32) -> Self {
+        Self {
+            tag: ValueTag::List,
+            _pad: [0; 7],
+            bits: idx as u64,
+        }
+    }
+
+    #[inline]
     pub fn tag(&self) -> ValueTag {
         self.tag
     }
@@ -162,6 +172,15 @@ impl Value {
     }
 
     #[inline]
+    pub fn as_list_idx(&self) -> Option<u32> {
+        if self.tag == ValueTag::List {
+            Some(self.bits as u32)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
     pub fn is_unit(&self) -> bool {
         self.tag == ValueTag::Unit
     }
@@ -174,6 +193,7 @@ impl Value {
             ValueTag::Float => "Float",
             ValueTag::InternedString | ValueTag::DynamicString => "String",
             ValueTag::Closure => "Closure",
+            ValueTag::List => "List",
         }
     }
 
@@ -192,6 +212,11 @@ impl Value {
             ValueTag::Closure => {
                 let closure = heap.get_closure(self.bits as u32);
                 format!("<closure fn{}>", closure.func_idx)
+            }
+            ValueTag::List => {
+                let list = heap.get_list(self.bits as u32);
+                let elements: Vec<String> = list.elements.iter().map(|v| v.display(heap)).collect();
+                format!("[{}]", elements.join(", "))
             }
         }
     }
@@ -212,6 +237,15 @@ impl Value {
             ValueTag::Closure => {
                 let closure = heap.get_closure(self.bits as u32);
                 format!("<closure fn{}>", closure.func_idx)
+            }
+            ValueTag::List => {
+                let list = heap.get_list(self.bits as u32);
+                let elements: Vec<String> = list
+                    .elements
+                    .iter()
+                    .map(|v| v.display_with_interner(heap, interner))
+                    .collect();
+                format!("[{}]", elements.join(", "))
             }
         }
     }
@@ -255,6 +289,19 @@ impl Value {
                 }
                 true
             }
+            (ValueTag::List, ValueTag::List) => {
+                let a = heap.get_list(self.bits as u32);
+                let b = heap.get_list(other.bits as u32);
+                if a.elements.len() != b.elements.len() {
+                    return false;
+                }
+                for (ea, eb) in a.elements.iter().zip(b.elements.iter()) {
+                    if !ea.eq(eb, heap, interner) {
+                        return false;
+                    }
+                }
+                true
+            }
             _ => false,
         }
     }
@@ -283,6 +330,7 @@ impl std::fmt::Debug for Value {
             ValueTag::InternedString => write!(f, "InternedString(spur={})", self.bits),
             ValueTag::DynamicString => write!(f, "DynamicString(idx={})", self.bits),
             ValueTag::Closure => write!(f, "Closure(idx={})", self.bits),
+            ValueTag::List => write!(f, "List(idx={})", self.bits),
         }
     }
 }
@@ -293,6 +341,11 @@ pub struct ClosureData {
     pub captures: Box<[Cell<Value>]>,
 }
 
+/// List data stored in heap pool.
+pub struct ListData {
+    pub elements: Vec<Value>,
+}
+
 /// GC statistics for debugging/profiling.
 #[derive(Debug, Clone, Default)]
 pub struct GcStats {
@@ -300,21 +353,25 @@ pub struct GcStats {
     pub bytes_freed: u64,
     pub strings_freed: u64,
     pub closures_freed: u64,
+    pub lists_freed: u64,
 }
 
-/// Heap for dynamic strings and closures with mark-and-sweep GC.
+/// Heap for dynamic strings, closures, and lists with mark-and-sweep GC.
 pub struct Heap {
     // Object storage (None = freed slot)
     strings: Vec<Option<String>>,
     closures: Vec<Option<ClosureData>>,
+    lists: Vec<Option<ListData>>,
 
     // Free lists for slot reuse
     free_strings: Vec<u32>,
     free_closures: Vec<u32>,
+    free_lists: Vec<u32>,
 
     // Mark bits (separate for cache efficiency)
     string_marks: Vec<bool>,
     closure_marks: Vec<bool>,
+    list_marks: Vec<bool>,
 
     // GC state
     bytes_allocated: usize,
@@ -332,10 +389,13 @@ impl Heap {
         Self {
             strings: Vec::new(),
             closures: Vec::new(),
+            lists: Vec::new(),
             free_strings: Vec::new(),
             free_closures: Vec::new(),
+            free_lists: Vec::new(),
             string_marks: Vec::new(),
             closure_marks: Vec::new(),
+            list_marks: Vec::new(),
             bytes_allocated: 0,
             gc_threshold: INITIAL_GC_THRESHOLD,
             stats: GcStats::default(),
@@ -396,6 +456,43 @@ impl Heap {
             .expect("accessing freed closure")
     }
 
+    /// Allocate a list on the heap, returns index.
+    /// Pre-fills with unit values for literal initialization via ListSet.
+    pub fn alloc_list(&mut self, capacity: usize) -> u32 {
+        // Estimate list size: Vec overhead (24) + elements (16 * capacity)
+        let size = 24 + 16 * capacity;
+        let data = ListData {
+            elements: vec![Value::unit(); capacity],
+        };
+
+        let idx = if let Some(free_idx) = self.free_lists.pop() {
+            self.lists[free_idx as usize] = Some(data);
+            self.list_marks[free_idx as usize] = false;
+            free_idx
+        } else {
+            let idx = self.lists.len() as u32;
+            self.lists.push(Some(data));
+            self.list_marks.push(false);
+            idx
+        };
+        self.bytes_allocated += size;
+        idx
+    }
+
+    /// Get list by index. Panics if freed.
+    pub fn get_list(&self, idx: u32) -> &ListData {
+        self.lists[idx as usize]
+            .as_ref()
+            .expect("accessing freed list")
+    }
+
+    /// Get mutable list by index. Panics if freed.
+    pub fn get_list_mut(&mut self, idx: u32) -> &mut ListData {
+        self.lists[idx as usize]
+            .as_mut()
+            .expect("accessing freed list")
+    }
+
     /// Check if GC should run based on allocation threshold.
     pub fn should_gc(&self) -> bool {
         self.bytes_allocated > self.gc_threshold
@@ -411,7 +508,7 @@ impl Heap {
         self.bytes_allocated
     }
 
-    /// Mark a value as reachable. Returns handles to trace if it's a closure.
+    /// Mark a value as reachable. Returns handles to trace if it's a closure or list.
     fn mark_value(&mut self, value: Value) -> Option<Vec<Value>> {
         match value.tag() {
             ValueTag::DynamicString => {
@@ -428,6 +525,17 @@ impl Heap {
                     // Return captures to trace
                     if let Some(closure) = &self.closures[idx] {
                         return Some(closure.captures.iter().map(|c| c.get()).collect());
+                    }
+                }
+                None
+            }
+            ValueTag::List => {
+                let idx = value.as_list_idx().unwrap() as usize;
+                if idx < self.list_marks.len() && !self.list_marks[idx] {
+                    self.list_marks[idx] = true;
+                    // Return elements to trace
+                    if let Some(list) = &self.lists[idx] {
+                        return Some(list.elements.clone());
                     }
                 }
                 None
@@ -452,6 +560,7 @@ impl Heap {
         let mut bytes_freed = 0u64;
         let mut strings_freed = 0u64;
         let mut closures_freed = 0u64;
+        let mut lists_freed = 0u64;
 
         // Sweep strings
         for (i, marked) in self.string_marks.iter_mut().enumerate() {
@@ -474,10 +583,22 @@ impl Heap {
             *marked = false;
         }
 
+        // Sweep lists
+        for (i, marked) in self.list_marks.iter_mut().enumerate() {
+            if !*marked && let Some(list) = self.lists[i].take() {
+                let size = 24 + 16 * list.elements.len();
+                bytes_freed += size as u64;
+                lists_freed += 1;
+                self.free_lists.push(i as u32);
+            }
+            *marked = false;
+        }
+
         self.bytes_allocated = self.bytes_allocated.saturating_sub(bytes_freed as usize);
         self.stats.bytes_freed += bytes_freed;
         self.stats.strings_freed += strings_freed;
         self.stats.closures_freed += closures_freed;
+        self.stats.lists_freed += lists_freed;
     }
 
     /// Run a full GC cycle with the given roots.

@@ -482,6 +482,73 @@ impl<'a> Compiler<'a> {
                 let src_slot = self.load_operand(src);
                 self.emit(Instruction::Echo { src: src_slot });
             }
+
+            // List operations
+            Inst::ListNew { dst, capacity } => {
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.emit(Instruction::ListNew {
+                    dst: dst_slot,
+                    capacity: *capacity,
+                });
+            }
+            Inst::ListSet { list, index, value } => {
+                let list_slot = self.load_operand(list);
+                let index_slot = self.load_operand(index);
+                let value_slot = self.load_operand(value);
+                self.emit(Instruction::ListSet {
+                    list: list_slot,
+                    index: index_slot,
+                    value: value_slot,
+                });
+            }
+            Inst::ListGet { dst, list, index } => {
+                let list_slot = self.load_operand(list);
+                let index_slot = self.load_operand(index);
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.emit(Instruction::ListGet {
+                    dst: dst_slot,
+                    list: list_slot,
+                    index: index_slot,
+                });
+            }
+            Inst::ListSlice {
+                dst,
+                list,
+                start,
+                end,
+            } => {
+                let list_slot = self.load_operand(list);
+                // Use i64::MIN as sentinel for "missing" bounds
+                let start_slot = match start {
+                    Some(s) => self.load_operand(s),
+                    None => {
+                        let slot = self.alloc_slot();
+                        self.emit(Instruction::LoadInt {
+                            dst: slot,
+                            value: i64::MIN,
+                        });
+                        slot
+                    }
+                };
+                let end_slot = match end {
+                    Some(e) => self.load_operand(e),
+                    None => {
+                        let slot = self.alloc_slot();
+                        self.emit(Instruction::LoadInt {
+                            dst: slot,
+                            value: i64::MIN,
+                        });
+                        slot
+                    }
+                };
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.emit(Instruction::ListSlice {
+                    dst: dst_slot,
+                    list: list_slot,
+                    start: start_slot,
+                    end: end_slot,
+                });
+            }
         }
     }
 

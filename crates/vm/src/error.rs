@@ -15,6 +15,10 @@ pub enum RuntimeError {
     NotAClosure,
     NoClosure,
     CaptureOutOfBounds(u8),
+    IndexOutOfBounds {
+        index: i64,
+        len: usize,
+    },
 }
 
 impl std::fmt::Display for RuntimeError {
@@ -32,6 +36,13 @@ impl std::fmt::Display for RuntimeError {
             RuntimeError::NoClosure => write!(f, "no closure environment in current frame"),
             RuntimeError::CaptureOutOfBounds(idx) => {
                 write!(f, "capture index {} out of bounds", idx)
+            }
+            RuntimeError::IndexOutOfBounds { index, len } => {
+                write!(
+                    f,
+                    "index {} out of bounds for list of length {}",
+                    index, len
+                )
             }
         }
     }
