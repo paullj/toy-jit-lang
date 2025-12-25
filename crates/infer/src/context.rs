@@ -306,6 +306,20 @@ impl<'a> InferCtx<'a> {
                 self.infer_expr_idx(*value);
                 Type::Unit
             }
+            Expression::Loop { body, .. } => {
+                self.infer_expr_idx(*body);
+                Type::Unit // loops return unit (break value support later)
+            }
+            Expression::While {
+                condition, body, ..
+            } => {
+                let (cond_ty, cond_span) = self.infer_expr_idx(*condition);
+                self.unify_or_error(&cond_ty, &Type::Boolean, cond_span);
+                self.infer_expr_idx(*body);
+                Type::Unit
+            }
+            Expression::Break { .. } => Type::Unit,
+            Expression::Continue { .. } => Type::Unit,
         }
     }
 
@@ -441,6 +455,8 @@ impl<'a> InferCtx<'a> {
                 BlockItem::Echo { value } => {
                     self.infer_expr_idx(*value);
                 }
+                BlockItem::Break { .. } => {}
+                BlockItem::Continue { .. } => {}
             }
         }
 

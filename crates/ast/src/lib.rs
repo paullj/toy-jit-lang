@@ -20,6 +20,8 @@ pub enum Item {
     VariableAssignment(VariableAssignment),
     ReturnStatement(ReturnStatement),
     EchoStatement(EchoStatement),
+    BreakStatement(BreakStatement),
+    ContinueStatement(ContinueStatement),
     Expression(Expression),
 }
 
@@ -31,6 +33,8 @@ impl Item {
             SyntaxKind::VariableAssignment => Self::VariableAssignment(VariableAssignment(node)),
             SyntaxKind::ReturnStatement => Self::ReturnStatement(ReturnStatement(node)),
             SyntaxKind::EchoStatement => Self::EchoStatement(EchoStatement(node)),
+            SyntaxKind::BreakStatement => Self::BreakStatement(BreakStatement(node)),
+            SyntaxKind::ContinueStatement => Self::ContinueStatement(ContinueStatement(node)),
             _ => Self::Expression(Expression::cast(node)?),
         };
         Some(result)
@@ -43,6 +47,8 @@ impl Item {
             Item::VariableAssignment(n) => n.syntax(),
             Item::ReturnStatement(n) => n.syntax(),
             Item::EchoStatement(n) => n.syntax(),
+            Item::BreakStatement(n) => n.syntax(),
+            Item::ContinueStatement(n) => n.syntax(),
             Item::Expression(e) => e.syntax(),
         }
     }
@@ -87,6 +93,8 @@ pub enum Expression {
     VariableReference(VariableReference),
     Block(BlockExpression),
     If(IfExpression),
+    Loop(LoopExpression),
+    While(WhileExpression),
     Function(FunctionExpression),
     Call(CallExpression),
 }
@@ -101,6 +109,8 @@ impl Expression {
             SyntaxKind::VariableReference => Self::VariableReference(VariableReference(node)),
             SyntaxKind::BlockExpression => Self::Block(BlockExpression(node)),
             SyntaxKind::IfExpression => Self::If(IfExpression(node)),
+            SyntaxKind::LoopExpression => Self::Loop(LoopExpression(node)),
+            SyntaxKind::WhileExpression => Self::While(WhileExpression(node)),
             SyntaxKind::FunctionExpression => Self::Function(FunctionExpression(node)),
             SyntaxKind::CallExpression => Self::Call(CallExpression(node)),
             _ => return None,
@@ -117,6 +127,8 @@ impl Expression {
             Expression::VariableReference(n) => n.syntax(),
             Expression::Block(n) => n.syntax(),
             Expression::If(n) => n.syntax(),
+            Expression::Loop(n) => n.syntax(),
+            Expression::While(n) => n.syntax(),
             Expression::Function(n) => n.syntax(),
             Expression::Call(n) => n.syntax(),
         }
@@ -493,6 +505,62 @@ ast_node!(EchoStatement, SyntaxKind::EchoStatement);
 impl EchoStatement {
     pub fn value(&self) -> Option<Expression> {
         self.0.children().find_map(Expression::cast)
+    }
+}
+
+ast_node!(LoopExpression, SyntaxKind::LoopExpression);
+
+impl LoopExpression {
+    pub fn label(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+
+    pub fn body(&self) -> Option<BlockExpression> {
+        self.0.children().find_map(BlockExpression::cast)
+    }
+}
+
+ast_node!(WhileExpression, SyntaxKind::WhileExpression);
+
+impl WhileExpression {
+    pub fn condition(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    pub fn label(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+
+    pub fn body(&self) -> Option<BlockExpression> {
+        self.0.children().find_map(BlockExpression::cast)
+    }
+}
+
+ast_node!(BreakStatement, SyntaxKind::BreakStatement);
+
+impl BreakStatement {
+    pub fn label(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+}
+
+ast_node!(ContinueStatement, SyntaxKind::ContinueStatement);
+
+impl ContinueStatement {
+    pub fn label(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
     }
 }
 

@@ -276,5 +276,9 @@ fn get_expr_type(expr: &Expression, hir: &LowerResult, inferred: &InferenceResul
         Expression::Call { .. } => Type::Unit,
         Expression::Return { .. } => Type::Unit,
         Expression::Echo { .. } => Type::Unit,
+        Expression::Loop { .. } => Type::Unit,
+        Expression::While { .. } => Type::Unit,
+        Expression::Break { .. } => Type::Unit,
+        Expression::Continue { .. } => Type::Unit,
     }
 }

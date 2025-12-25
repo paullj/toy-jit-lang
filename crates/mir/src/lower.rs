@@ -13,6 +13,14 @@ pub fn lower(hir: &hir::LowerResult, _types: &InferenceResult) -> Module {
     ctx.finish()
 }
 
+/// Tracks loop context for break/continue targets
+#[derive(Clone)]
+struct LoopContext {
+    label: Option<String>,
+    continue_bb: BlockId,
+    break_bb: BlockId,
+}
+
 /// Saved context for nested function lowering
 struct SavedContext {
     blocks: Vec<Block>,
@@ -22,6 +30,7 @@ struct SavedContext {
     next_block: u32,
     local_scopes: Vec<HashMap<String, LocalId>>,
     capture_map: HashMap<String, u32>,
+    loop_stack: Vec<LoopContext>,
 }
 
 struct LowerCtx<'a> {
@@ -47,6 +56,9 @@ struct LowerCtx<'a> {
 
     // Closure context
     capture_map: HashMap<String, u32>, // name -> capture index (for inside closure body)
+
+    // Loop context stack for break/continue
+    loop_stack: Vec<LoopContext>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -64,6 +76,7 @@ impl<'a> LowerCtx<'a> {
             next_func_id: 0,
             func_names: HashMap::new(),
             capture_map: HashMap::new(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -81,6 +94,7 @@ impl<'a> LowerCtx<'a> {
             next_block: self.next_block,
             local_scopes: std::mem::take(&mut self.local_scopes),
             capture_map: std::mem::take(&mut self.capture_map),
+            loop_stack: std::mem::take(&mut self.loop_stack),
         }
     }
 
@@ -92,6 +106,18 @@ impl<'a> LowerCtx<'a> {
         self.next_block = saved.next_block;
         self.local_scopes = saved.local_scopes;
         self.capture_map = saved.capture_map;
+        self.loop_stack = saved.loop_stack;
+    }
+
+    fn find_loop(&self, label: Option<&str>) -> Option<&LoopContext> {
+        match label {
+            None => self.loop_stack.last(),
+            Some(target) => self
+                .loop_stack
+                .iter()
+                .rev()
+                .find(|ctx| ctx.label.as_deref() == Some(target)),
+        }
     }
 
     fn alloc_func_id(&mut self) -> FuncId {
@@ -150,6 +176,10 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn emit(&mut self, inst: Inst) {
+        // Don't emit anything after a terminator (block is already sealed)
+        if self.current_block.is_terminated() {
+            return;
+        }
         self.current_block.push(inst);
     }
 
@@ -496,6 +526,28 @@ impl<'a> LowerCtx<'a> {
                 self.emit(Inst::Echo { src: operand });
                 Operand::IntConst(0)
             }
+            Expression::Loop { label, body } => self.lower_loop(label.as_ref(), *body),
+            Expression::While {
+                condition,
+                label,
+                body,
+            } => self.lower_while(label.as_ref(), *condition, *body),
+            Expression::Break { label } => {
+                let label_str = label.map(|l| self.resolve(l).to_string());
+                if let Some(ctx) = self.find_loop(label_str.as_deref()) {
+                    let target = ctx.break_bb;
+                    self.emit(Inst::Jump { target });
+                }
+                Operand::IntConst(0)
+            }
+            Expression::Continue { label } => {
+                let label_str = label.map(|l| self.resolve(l).to_string());
+                if let Some(ctx) = self.find_loop(label_str.as_deref()) {
+                    let target = ctx.continue_bb;
+                    self.emit(Inst::Jump { target });
+                }
+                Operand::IntConst(0)
+            }
         }
     }
 
@@ -693,6 +745,20 @@ impl<'a> LowerCtx<'a> {
                     let operand = self.lower_expr_idx(*value);
                     self.emit(Inst::Echo { src: operand });
                 }
+                BlockItem::Break { label } => {
+                    let label_str = label.map(|l| self.resolve(l).to_string());
+                    if let Some(ctx) = self.find_loop(label_str.as_deref()) {
+                        let target = ctx.break_bb;
+                        self.emit(Inst::Jump { target });
+                    }
+                }
+                BlockItem::Continue { label } => {
+                    let label_str = label.map(|l| self.resolve(l).to_string());
+                    if let Some(ctx) = self.find_loop(label_str.as_deref()) {
+                        let target = ctx.continue_bb;
+                        self.emit(Inst::Jump { target });
+                    }
+                }
             }
         }
 
@@ -742,6 +808,74 @@ impl<'a> LowerCtx<'a> {
         // Merge
         self.switch_to_block(merge_bb);
         Operand::VReg(result)
+    }
+
+    fn lower_loop(&mut self, label: Option<&Ident>, body: ExprIdx) -> Operand {
+        let loop_bb = self.create_block();
+        let exit_bb = self.create_block();
+
+        let label_str = label.map(|l| self.resolve(*l).to_string());
+
+        // Push loop context
+        self.loop_stack.push(LoopContext {
+            label: label_str,
+            continue_bb: loop_bb,
+            break_bb: exit_bb,
+        });
+
+        // Jump to loop
+        self.emit(Inst::Jump { target: loop_bb });
+
+        // Loop body
+        self.switch_to_block(loop_bb);
+        self.lower_expr_idx(body);
+        self.emit(Inst::Jump { target: loop_bb }); // loop back
+
+        // Pop loop context
+        self.loop_stack.pop();
+
+        // Exit block
+        self.switch_to_block(exit_bb);
+        Operand::IntConst(0)
+    }
+
+    fn lower_while(&mut self, label: Option<&Ident>, cond: ExprIdx, body: ExprIdx) -> Operand {
+        let cond_bb = self.create_block();
+        let loop_bb = self.create_block();
+        let exit_bb = self.create_block();
+
+        let label_str = label.map(|l| self.resolve(*l).to_string());
+
+        // Push loop context (continue goes to condition check)
+        self.loop_stack.push(LoopContext {
+            label: label_str,
+            continue_bb: cond_bb,
+            break_bb: exit_bb,
+        });
+
+        // Jump to condition
+        self.emit(Inst::Jump { target: cond_bb });
+
+        // Condition block
+        self.switch_to_block(cond_bb);
+        let cond_op = self.lower_expr_idx(cond);
+        self.emit(Inst::Branch {
+            cond: cond_op,
+            then_bb: loop_bb,
+            else_bb: exit_bb,
+        });
+
+        // Loop body
+        self.switch_to_block(loop_bb);
+        self.lower_expr_idx(body);
+        self.emit(Inst::Jump { target: cond_bb }); // back to condition
+
+        // Pop loop context
+        self.loop_stack.pop();
+
+        // Exit block
+        self.switch_to_block(exit_bb);
+        Operand::IntConst(0)
     }
 
     fn finish(self) -> Module {

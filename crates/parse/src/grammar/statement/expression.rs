@@ -62,7 +62,9 @@ pub(crate) const EXPR_FIRST: TokenSet = LITERAL_SET
     .union(TokenSet::single(TokenKind::LeftParenthesis))
     .union(TokenSet::single(TokenKind::LeftBrace))
     .union(TokenSet::single(TokenKind::If))
-    .union(TokenSet::single(TokenKind::Fn));
+    .union(TokenSet::single(TokenKind::Fn))
+    .union(TokenSet::single(TokenKind::Loop))
+    .union(TokenSet::single(TokenKind::While));
 
 /// Recovery set for expression parsing (skip to newline or expr start)
 const EXPR_RECOVERY: TokenSet = EXPR_FIRST.union(TokenSet::single(TokenKind::NewLine));
@@ -187,6 +189,8 @@ fn lhs(p: &mut Parser) -> Option<CompletedMarker> {
         Some(TokenKind::LeftBrace) => Some(block_expression(p)),
         Some(TokenKind::If) => Some(if_expression(p)),
         Some(TokenKind::Fn) => Some(crate::grammar::function_definition_or_expression(p)),
+        Some(TokenKind::Loop) => Some(loop_expression(p)),
+        Some(TokenKind::While) => Some(while_expression(p)),
         _ => {
             p.recover("expected expression", EXPR_RECOVERY);
             None
@@ -324,6 +328,72 @@ fn if_expression(p: &mut Parser) -> CompletedMarker {
     }
 
     m.complete(p, SyntaxKind::IfExpression)
+}
+
+fn loop_expression(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::Loop));
+    let m = p.start();
+    p.consume();
+
+    if p.at(TokenKind::Colon) {
+        p.consume();
+        if !p.eat(TokenKind::Identifier) {
+            let span = p.current_span();
+            let found = p.current().map(|k| k.to_string());
+            p.error(crate::ParseError::UnexpectedToken {
+                at: span.into(),
+                expected: "label identifier".to_string(),
+                found,
+            });
+        }
+    }
+
+    if !p.at(TokenKind::LeftBrace) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "'{'".to_string(),
+            found,
+        });
+    }
+    block_expression(p);
+
+    m.complete(p, SyntaxKind::LoopExpression)
+}
+
+fn while_expression(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::While));
+    let m = p.start();
+    p.consume();
+
+    expression(p);
+
+    if p.at(TokenKind::Colon) {
+        p.consume();
+        if !p.eat(TokenKind::Identifier) {
+            let span = p.current_span();
+            let found = p.current().map(|k| k.to_string());
+            p.error(crate::ParseError::UnexpectedToken {
+                at: span.into(),
+                expected: "label identifier".to_string(),
+                found,
+            });
+        }
+    }
+
+    if !p.at(TokenKind::LeftBrace) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "'{'".to_string(),
+            found,
+        });
+    }
+    block_expression(p);
+
+    m.complete(p, SyntaxKind::WhileExpression)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -10,13 +10,17 @@ const ITEM_RECOVERY: TokenSet = EXPR_FIRST
     .union(TokenSet::single(TokenKind::Identifier))
     .union(TokenSet::single(TokenKind::Fn))
     .union(TokenSet::single(TokenKind::Return))
-    .union(TokenSet::single(TokenKind::Echo));
+    .union(TokenSet::single(TokenKind::Echo))
+    .union(TokenSet::single(TokenKind::Break))
+    .union(TokenSet::single(TokenKind::Continue));
 
 pub(crate) fn item(p: &mut Parser) -> Option<CompletedMarker> {
     match p.current() {
         Some(TokenKind::Fn) => Some(function_definition_or_expression(p)),
         Some(TokenKind::Return) => Some(return_statement(p)),
         Some(TokenKind::Echo) => Some(echo_statement(p)),
+        Some(TokenKind::Break) => Some(break_statement(p)),
+        Some(TokenKind::Continue) => Some(continue_statement(p)),
         Some(TokenKind::Identifier) => {
             let m = p.start();
             p.consume();
@@ -86,4 +90,28 @@ fn echo_statement(p: &mut Parser) -> CompletedMarker {
     }
 
     m.complete(p, SyntaxKind::EchoStatement)
+}
+
+fn break_statement(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::Break));
+    let m = p.start();
+    p.consume();
+
+    if p.at(TokenKind::Identifier) && !p.at_newline_terminator() {
+        p.consume();
+    }
+
+    m.complete(p, SyntaxKind::BreakStatement)
+}
+
+fn continue_statement(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::Continue));
+    let m = p.start();
+    p.consume();
+
+    if p.at(TokenKind::Identifier) && !p.at_newline_terminator() {
+        p.consume();
+    }
+
+    m.complete(p, SyntaxKind::ContinueStatement)
 }

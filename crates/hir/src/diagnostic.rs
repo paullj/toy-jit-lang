@@ -18,4 +18,26 @@ pub enum HirDiagnostic {
         #[label("empty block")]
         span: SourceSpan,
     },
+
+    #[error("`break` outside of loop")]
+    #[diagnostic(code(hir::break_outside_loop))]
+    BreakOutsideLoop {
+        #[label("cannot `break` outside of a loop")]
+        span: SourceSpan,
+    },
+
+    #[error("`continue` outside of loop")]
+    #[diagnostic(code(hir::continue_outside_loop))]
+    ContinueOutsideLoop {
+        #[label("cannot `continue` outside of a loop")]
+        span: SourceSpan,
+    },
+
+    #[error("unknown loop label `{label}`")]
+    #[diagnostic(code(hir::unknown_loop_label))]
+    UnknownLoopLabel {
+        label: String,
+        #[label("no loop with this label in scope")]
+        span: SourceSpan,
+    },
 }

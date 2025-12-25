@@ -22,9 +22,14 @@ pub fn token_style(kind: TokenKind) -> Style {
         }
 
         // Control flow keywords
-        TokenKind::If | TokenKind::Else | TokenKind::Return | TokenKind::Echo => {
-            Style::default().fg(Color::Magenta)
-        }
+        TokenKind::If
+        | TokenKind::Else
+        | TokenKind::Return
+        | TokenKind::Echo
+        | TokenKind::Loop
+        | TokenKind::While
+        | TokenKind::Break
+        | TokenKind::Continue => Style::default().fg(Color::Magenta),
 
         // Function keywords
         TokenKind::Fn => Style::default().fg(Color::Blue),

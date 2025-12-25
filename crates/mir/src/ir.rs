@@ -256,6 +256,16 @@ pub enum Inst {
     },
 }
 
+impl Inst {
+    /// Returns true if this instruction is a block terminator
+    pub fn is_terminator(&self) -> bool {
+        matches!(
+            self,
+            Inst::Jump { .. } | Inst::Branch { .. } | Inst::Return { .. }
+        )
+    }
+}
+
 /// Basic block containing a sequence of instructions
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -273,6 +283,11 @@ impl Block {
 
     pub fn push(&mut self, inst: Inst) {
         self.insts.push(inst);
+    }
+
+    /// Returns true if this block ends with a terminator instruction
+    pub fn is_terminated(&self) -> bool {
+        self.insts.last().is_some_and(|i| i.is_terminator())
     }
 }
 
