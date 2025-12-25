@@ -252,6 +252,30 @@ literal = "echo"
 category = "keyword"
 textmate_scope = "keyword.control.flow.toy"
 
+[[tokens]]
+name = "Loop"
+literal = "loop"
+category = "keyword"
+textmate_scope = "keyword.control.loop.toy"
+
+[[tokens]]
+name = "While"
+literal = "while"
+category = "keyword"
+textmate_scope = "keyword.control.loop.toy"
+
+[[tokens]]
+name = "Break"
+literal = "break"
+category = "keyword"
+textmate_scope = "keyword.control.flow.toy"
+
+[[tokens]]
+name = "Continue"
+literal = "continue"
+category = "keyword"
+textmate_scope = "keyword.control.flow.toy"
+
 # Literals
 [[tokens]]
 name = "Identifier"

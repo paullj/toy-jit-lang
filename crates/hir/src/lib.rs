@@ -110,6 +110,21 @@ pub enum Expression {
     Echo {
         value: ExprIdx,
     },
+    Loop {
+        label: Option<Ident>,
+        body: ExprIdx,
+    },
+    While {
+        condition: ExprIdx,
+        label: Option<Ident>,
+        body: ExprIdx,
+    },
+    Break {
+        label: Option<Ident>,
+    },
+    Continue {
+        label: Option<Ident>,
+    },
 }
 
 /// Item inside a block expression
@@ -120,6 +135,8 @@ pub enum BlockItem {
     Expression(ExprIdx),
     Return { value: Option<ExprIdx> },
     Echo { value: ExprIdx },
+    Break { label: Option<Ident> },
+    Continue { label: Option<Ident> },
 }
 
 #[derive(Debug, Clone)]

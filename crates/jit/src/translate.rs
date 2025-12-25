@@ -587,7 +587,7 @@ impl<'a> FunctionTranslator<'a> {
         if let Some(entry) = func.blocks.first() {
             let entry_block = self.blocks[&entry.id];
             self.builder.switch_to_block(entry_block);
-            self.builder.seal_block(entry_block);
+            // Don't seal here - seal all blocks after translation
         }
 
         for i in 0..func.local_count {
@@ -609,9 +609,7 @@ impl<'a> FunctionTranslator<'a> {
             self.translate_inst(inst);
         }
 
-        if block.id.0 != 0 {
-            self.builder.seal_block(cl_block);
-        }
+        // Don't seal individual blocks - seal all at once in finalize()
     }
 
     fn translate_inst(&mut self, inst: &Inst) {
@@ -1034,7 +1032,8 @@ impl<'a> FunctionTranslator<'a> {
         self.builder.inst_results(call)[0]
     }
 
-    pub fn finalize(self) {
+    pub fn finalize(mut self) {
+        self.builder.seal_all_blocks();
         self.builder.finalize();
     }
 }

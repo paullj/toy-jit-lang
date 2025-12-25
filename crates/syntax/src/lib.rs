@@ -64,6 +64,10 @@ pub enum SyntaxKind {
     FnKeyword,
     ReturnKeyword,
     EchoKeyword,
+    LoopKeyword,
+    WhileKeyword,
+    BreakKeyword,
+    ContinueKeyword,
 
     // Tokens - Literals
     Identifier,
@@ -95,6 +99,10 @@ pub enum SyntaxKind {
     CallExpression,
     ReturnStatement,
     EchoStatement,
+    LoopExpression,
+    WhileExpression,
+    BreakStatement,
+    ContinueStatement,
 }
 
 impl SyntaxKind {
@@ -167,6 +175,10 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::Fn => SyntaxKind::FnKeyword,
             TokenKind::Return => SyntaxKind::ReturnKeyword,
             TokenKind::Echo => SyntaxKind::EchoKeyword,
+            TokenKind::Loop => SyntaxKind::LoopKeyword,
+            TokenKind::While => SyntaxKind::WhileKeyword,
+            TokenKind::Break => SyntaxKind::BreakKeyword,
+            TokenKind::Continue => SyntaxKind::ContinueKeyword,
 
             // Literals
             TokenKind::Identifier => SyntaxKind::Identifier,

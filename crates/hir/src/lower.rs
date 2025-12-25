@@ -98,12 +98,19 @@ impl Default for LowerResult {
     }
 }
 
+/// Tracks loop context for break/continue validation
+#[derive(Clone)]
+struct LoopContext {
+    label: Option<Ident>,
+}
+
 struct Ctx {
     expressions: Arena<Expression>,
     expr_spans: ArenaMap<ExprIdx, TextRange>,
     symbols: SymbolTable,
     diagnostics: Vec<HirDiagnostic>,
     interner: Rodeo,
+    loop_stack: Vec<LoopContext>,
 }
 
 impl Ctx {
@@ -114,6 +121,26 @@ impl Ctx {
             symbols: SymbolTable::new(),
             diagnostics: Vec::new(),
             interner: Rodeo::default(),
+            loop_stack: Vec::new(),
+        }
+    }
+
+    fn push_loop(&mut self, label: Option<Ident>) {
+        self.loop_stack.push(LoopContext { label });
+    }
+
+    fn pop_loop(&mut self) {
+        self.loop_stack.pop();
+    }
+
+    fn in_loop(&self) -> bool {
+        !self.loop_stack.is_empty()
+    }
+
+    fn find_loop(&self, label: Option<Ident>) -> bool {
+        match label {
+            None => self.in_loop(),
+            Some(target) => self.loop_stack.iter().any(|ctx| ctx.label == Some(target)),
         }
     }
 
@@ -247,6 +274,44 @@ fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
                 value.unwrap_or_else(|| ctx.alloc(Expression::Missing, Default::default()));
             Some(Item::Expression(Expression::Echo { value: value_idx }))
         }
+        ast::Item::BreakStatement(brk) => {
+            let span = brk.syntax().text_range();
+            let label = brk.label().map(|t| ctx.intern(t.text()));
+
+            if !ctx.in_loop() {
+                ctx.diagnostics.push(HirDiagnostic::BreakOutsideLoop {
+                    span: to_span(span),
+                });
+            } else if let Some(lbl) = label
+                && !ctx.find_loop(Some(lbl))
+            {
+                ctx.diagnostics.push(HirDiagnostic::UnknownLoopLabel {
+                    label: ctx.interner.resolve(&lbl.spur()).to_string(),
+                    span: to_span(span),
+                });
+            }
+
+            Some(Item::Expression(Expression::Break { label }))
+        }
+        ast::Item::ContinueStatement(cont) => {
+            let span = cont.syntax().text_range();
+            let label = cont.label().map(|t| ctx.intern(t.text()));
+
+            if !ctx.in_loop() {
+                ctx.diagnostics.push(HirDiagnostic::ContinueOutsideLoop {
+                    span: to_span(span),
+                });
+            } else if let Some(lbl) = label
+                && !ctx.find_loop(Some(lbl))
+            {
+                ctx.diagnostics.push(HirDiagnostic::UnknownLoopLabel {
+                    label: ctx.interner.resolve(&lbl.spur()).to_string(),
+                    span: to_span(span),
+                });
+            }
+
+            Some(Item::Expression(Expression::Continue { label }))
+        }
         ast::Item::Expression(expr) => {
             let value = lower_expression(ctx, Some(expr));
             Some(Item::Expression(value))
@@ -301,6 +366,8 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
         }
         ast::Expression::Block(block) => lower_block(ctx, block),
         ast::Expression::If(if_expr) => lower_if(ctx, if_expr),
+        ast::Expression::Loop(loop_expr) => lower_loop(ctx, loop_expr),
+        ast::Expression::While(while_expr) => lower_while(ctx, while_expr),
         ast::Expression::Function(fn_expr) => lower_function_expr(ctx, fn_expr),
         ast::Expression::Call(call) => lower_call(ctx, call),
     }
@@ -528,6 +595,61 @@ fn lower_if(ctx: &mut Ctx, ast: ast::IfExpression) -> Expression {
     }
 }
 
+fn lower_loop(ctx: &mut Ctx, ast: ast::LoopExpression) -> Expression {
+    let label = ast.label().map(|t| ctx.intern(t.text()));
+
+    ctx.push_loop(label);
+
+    let body_ast = ast.body();
+    let body_span = body_ast
+        .as_ref()
+        .map(|b| b.syntax().text_range())
+        .unwrap_or_default();
+    let body = body_ast
+        .map(|b| lower_block(ctx, b))
+        .unwrap_or(Expression::Missing);
+    let body_idx = ctx.alloc(body, body_span);
+
+    ctx.pop_loop();
+
+    Expression::Loop {
+        label,
+        body: body_idx,
+    }
+}
+
+fn lower_while(ctx: &mut Ctx, ast: ast::WhileExpression) -> Expression {
+    let cond_ast = ast.condition();
+    let cond_span = cond_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let cond_expr = lower_expression(ctx, cond_ast);
+    let condition = ctx.alloc(cond_expr, cond_span);
+
+    let label = ast.label().map(|t| ctx.intern(t.text()));
+
+    ctx.push_loop(label);
+
+    let body_ast = ast.body();
+    let body_span = body_ast
+        .as_ref()
+        .map(|b| b.syntax().text_range())
+        .unwrap_or_default();
+    let body = body_ast
+        .map(|b| lower_block(ctx, b))
+        .unwrap_or(Expression::Missing);
+    let body_idx = ctx.alloc(body, body_span);
+
+    ctx.pop_loop();
+
+    Expression::While {
+        condition,
+        label,
+        body: body_idx,
+    }
+}
+
 fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
     match ast {
         ast::Item::FunctionDefinition(fn_def) => {
@@ -623,6 +745,44 @@ fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
             let value_idx =
                 value.unwrap_or_else(|| ctx.alloc(Expression::Missing, Default::default()));
             Some(BlockItem::Echo { value: value_idx })
+        }
+        ast::Item::BreakStatement(brk) => {
+            let span = brk.syntax().text_range();
+            let label = brk.label().map(|t| ctx.intern(t.text()));
+
+            if !ctx.in_loop() {
+                ctx.diagnostics.push(HirDiagnostic::BreakOutsideLoop {
+                    span: to_span(span),
+                });
+            } else if let Some(lbl) = label
+                && !ctx.find_loop(Some(lbl))
+            {
+                ctx.diagnostics.push(HirDiagnostic::UnknownLoopLabel {
+                    label: ctx.interner.resolve(&lbl.spur()).to_string(),
+                    span: to_span(span),
+                });
+            }
+
+            Some(BlockItem::Break { label })
+        }
+        ast::Item::ContinueStatement(cont) => {
+            let span = cont.syntax().text_range();
+            let label = cont.label().map(|t| ctx.intern(t.text()));
+
+            if !ctx.in_loop() {
+                ctx.diagnostics.push(HirDiagnostic::ContinueOutsideLoop {
+                    span: to_span(span),
+                });
+            } else if let Some(lbl) = label
+                && !ctx.find_loop(Some(lbl))
+            {
+                ctx.diagnostics.push(HirDiagnostic::UnknownLoopLabel {
+                    label: ctx.interner.resolve(&lbl.spur()).to_string(),
+                    span: to_span(span),
+                });
+            }
+
+            Some(BlockItem::Continue { label })
         }
         ast::Item::Expression(expr) => {
             let span = expr.syntax().text_range();

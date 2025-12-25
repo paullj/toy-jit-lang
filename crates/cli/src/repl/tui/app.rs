@@ -323,6 +323,10 @@ fn get_expr_type(
         hir::Expression::Call { .. } => infer::Type::Unit,
         hir::Expression::Return { .. } => infer::Type::Unit,
         hir::Expression::Echo { .. } => infer::Type::Unit,
+        hir::Expression::Loop { .. } => infer::Type::Unit,
+        hir::Expression::While { .. } => infer::Type::Unit,
+        hir::Expression::Break { .. } => infer::Type::Unit,
+        hir::Expression::Continue { .. } => infer::Type::Unit,
     }
 }
 
