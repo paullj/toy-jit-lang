@@ -1,110 +1,145 @@
-//! Compact 16-byte runtime value representation.
+//! NaN-boxed 8-byte runtime value representation.
+//!
+//! Uses IEEE 754 quiet NaN encoding to pack all value types into 64 bits:
+//! - Floats: raw IEEE 754 double
+//! - Other types: quiet NaN + 3-bit tag + 48-bit payload
 
 use std::cell::Cell;
 
 use compile::Spur;
 use lasso::{Key, Rodeo};
 
-/// Value tag discriminant
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValueTag {
-    Unit = 0,
-    Bool = 1,
-    Int = 2,
-    Float = 3,
-    InternedString = 4,
-    DynamicString = 5,
-    Closure = 6,
-}
+// NaN boxing constants
+// Use negative quiet NaN (sign=1, exp=0x7FF, quiet=1) to avoid collisions with real NaNs
+// Bits 48-50 are free for tags, bits 0-47 for payload
+const QNAN: u64 = 0xFFF8_0000_0000_0000;
+const TAG_MASK: u64 = 0x0007_0000_0000_0000; // 3 bits for type tag (bits 48-50)
+const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF; // 48-bit payload
 
-/// Compact 16-byte runtime value.
+// Tags (bits 48-50) - OR'd with QNAN
+const TAG_INT: u64 = 0x0001_0000_0000_0000; // 001
+const TAG_BOOL: u64 = 0x0002_0000_0000_0000; // 010
+const TAG_UNIT: u64 = 0x0003_0000_0000_0000; // 011
+const TAG_INTERNED: u64 = 0x0004_0000_0000_0000; // 100
+const TAG_DYNSTR: u64 = 0x0005_0000_0000_0000; // 101
+const TAG_CLOSURE: u64 = 0x0006_0000_0000_0000; // 110
+
+// Combined patterns for fast checking
+const QNAN_INT: u64 = QNAN | TAG_INT;
+const QNAN_BOOL: u64 = QNAN | TAG_BOOL;
+const QNAN_UNIT: u64 = QNAN | TAG_UNIT;
+const QNAN_INTERNED: u64 = QNAN | TAG_INTERNED;
+const QNAN_DYNSTR: u64 = QNAN | TAG_DYNSTR;
+const QNAN_CLOSURE: u64 = QNAN | TAG_CLOSURE;
+
+// Mask for type checking: QNAN + TAG
+const TYPE_MASK: u64 = QNAN | TAG_MASK;
+
+/// NaN-boxed 8-byte runtime value.
 ///
-/// Heap-allocated types (DynamicString, Closure) store an index into the Heap pools.
-/// InternedString stores a Spur key into the module's string interner.
+/// Encoding:
+/// - Float: raw IEEE 754 double (not a quiet NaN)
+/// - Int: QNAN | TAG_INT | 48-bit signed payload
+/// - Bool: QNAN | TAG_BOOL | 0 or 1
+/// - Unit: QNAN | TAG_UNIT
+/// - InternedString: QNAN | TAG_INTERNED | spur index
+/// - DynamicString: QNAN | TAG_DYNSTR | heap index
+/// - Closure: QNAN | TAG_CLOSURE | heap index
 #[derive(Clone, Copy)]
-#[repr(C)]
-pub struct Value {
-    tag: ValueTag,
-    _pad: [u8; 7],
-    bits: u64,
-}
+#[repr(transparent)]
+pub struct Value(u64);
 
 impl Value {
-    #[inline]
+    #[inline(always)]
     pub const fn unit() -> Self {
-        Self {
-            tag: ValueTag::Unit,
-            _pad: [0; 7],
-            bits: 0,
-        }
+        Self(QNAN_UNIT)
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn bool(b: bool) -> Self {
-        Self {
-            tag: ValueTag::Bool,
-            _pad: [0; 7],
-            bits: b as u64,
-        }
+        Self(QNAN_BOOL | (b as u64))
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn int(n: i64) -> Self {
-        Self {
-            tag: ValueTag::Int,
-            _pad: [0; 7],
-            bits: n as u64,
-        }
+        // Mask to 48 bits (preserves sign via two's complement)
+        Self(QNAN_INT | ((n as u64) & PAYLOAD_MASK))
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn float(f: f64) -> Self {
-        Self {
-            tag: ValueTag::Float,
-            _pad: [0; 7],
-            bits: f.to_bits(),
-        }
+        Self(f.to_bits())
     }
 
     /// Create an interned string value (references module string table)
-    #[inline]
+    #[inline(always)]
     pub fn interned_string(spur: Spur) -> Self {
-        Self {
-            tag: ValueTag::InternedString,
-            _pad: [0; 7],
-            bits: spur.into_usize() as u64,
-        }
+        Self(QNAN_INTERNED | (spur.into_usize() as u64))
     }
 
     /// Create a dynamic string value (references heap)
-    #[inline]
+    #[inline(always)]
     pub const fn dynamic_string(idx: u32) -> Self {
-        Self {
-            tag: ValueTag::DynamicString,
-            _pad: [0; 7],
-            bits: idx as u64,
-        }
+        Self(QNAN_DYNSTR | (idx as u64))
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn closure(idx: u32) -> Self {
-        Self {
-            tag: ValueTag::Closure,
-            _pad: [0; 7],
-            bits: idx as u64,
-        }
+        Self(QNAN_CLOSURE | (idx as u64))
     }
 
-    #[inline]
-    pub fn tag(&self) -> ValueTag {
-        self.tag
+    /// Check if this is a float (not NaN-boxed)
+    #[inline(always)]
+    pub fn is_float(&self) -> bool {
+        (self.0 & QNAN) != QNAN
     }
 
-    #[inline]
+    /// Check if this is an integer
+    #[inline(always)]
+    pub fn is_int(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_INT
+    }
+
+    /// Check if this is a boolean
+    #[inline(always)]
+    pub fn is_bool(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_BOOL
+    }
+
+    /// Check if this is unit
+    #[inline(always)]
+    pub fn is_unit(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_UNIT
+    }
+
+    /// Check if this is an interned string
+    #[inline(always)]
+    pub fn is_interned_string(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_INTERNED
+    }
+
+    /// Check if this is a dynamic string
+    #[inline(always)]
+    pub fn is_dynamic_string(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_DYNSTR
+    }
+
+    /// Check if this is a closure
+    #[inline(always)]
+    pub fn is_closure(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_CLOSURE
+    }
+
+    /// Check if this is any string type
+    #[inline(always)]
+    pub fn is_string(&self) -> bool {
+        self.is_interned_string() || self.is_dynamic_string()
+    }
+
+    #[inline(always)]
     pub fn as_bool(&self) -> Option<bool> {
-        if self.tag == ValueTag::Bool {
-            Some(self.bits != 0)
+        if self.is_bool() {
+            Some((self.0 & 1) != 0)
         } else {
             None
         }
@@ -113,18 +148,14 @@ impl Value {
     /// Get bool value. Panics in debug if wrong type.
     #[inline(always)]
     pub fn as_bool_unchecked(&self) -> bool {
-        debug_assert!(
-            self.tag == ValueTag::Bool,
-            "expected Bool, got {:?}",
-            self.tag
-        );
-        self.bits != 0
+        debug_assert!(self.is_bool(), "expected Bool");
+        (self.0 & 1) != 0
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn as_int(&self) -> Option<i64> {
-        if self.tag == ValueTag::Int {
-            Some(self.bits as i64)
+        if self.is_int() {
+            Some(self.extract_signed_payload())
         } else {
             None
         }
@@ -133,18 +164,22 @@ impl Value {
     /// Get int value. Panics in debug if wrong type.
     #[inline(always)]
     pub fn as_int_unchecked(&self) -> i64 {
-        debug_assert!(
-            self.tag == ValueTag::Int,
-            "expected Int, got {:?}",
-            self.tag
-        );
-        self.bits as i64
+        debug_assert!(self.is_int(), "expected Int");
+        self.extract_signed_payload()
     }
 
-    #[inline]
+    /// Extract 48-bit payload as signed i64 (sign-extend)
+    #[inline(always)]
+    fn extract_signed_payload(&self) -> i64 {
+        let payload = self.0 & PAYLOAD_MASK;
+        // Sign-extend from 48 bits: shift left then arithmetic shift right
+        ((payload as i64) << 16) >> 16
+    }
+
+    #[inline(always)]
     pub fn as_float(&self) -> Option<f64> {
-        if self.tag == ValueTag::Float {
-            Some(f64::from_bits(self.bits))
+        if self.is_float() {
+            Some(f64::from_bits(self.0))
         } else {
             None
         }
@@ -153,42 +188,33 @@ impl Value {
     /// Get float value. Panics in debug if wrong type.
     #[inline(always)]
     pub fn as_float_unchecked(&self) -> f64 {
-        debug_assert!(
-            self.tag == ValueTag::Float,
-            "expected Float, got {:?}",
-            self.tag
-        );
-        f64::from_bits(self.bits)
+        debug_assert!(self.is_float(), "expected Float");
+        f64::from_bits(self.0)
     }
 
-    #[inline]
-    pub fn is_string(&self) -> bool {
-        self.tag == ValueTag::InternedString || self.tag == ValueTag::DynamicString
-    }
-
-    #[inline]
+    #[inline(always)]
     pub fn as_interned_string(&self) -> Option<Spur> {
-        if self.tag == ValueTag::InternedString {
-            // We stored a valid Spur's usize, so this should always succeed
-            Spur::try_from_usize(self.bits as usize)
+        if self.is_interned_string() {
+            let payload = (self.0 & PAYLOAD_MASK) as usize;
+            Spur::try_from_usize(payload)
         } else {
             None
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn as_dynamic_string_idx(&self) -> Option<u32> {
-        if self.tag == ValueTag::DynamicString {
-            Some(self.bits as u32)
+        if self.is_dynamic_string() {
+            Some((self.0 & PAYLOAD_MASK) as u32)
         } else {
             None
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn as_closure_idx(&self) -> Option<u32> {
-        if self.tag == ValueTag::Closure {
-            Some(self.bits as u32)
+        if self.is_closure() {
+            Some((self.0 & PAYLOAD_MASK) as u32)
         } else {
             None
         }
@@ -197,121 +223,147 @@ impl Value {
     /// Get closure index. Panics in debug if wrong type.
     #[inline(always)]
     pub fn as_closure_idx_unchecked(&self) -> u32 {
-        debug_assert!(
-            self.tag == ValueTag::Closure,
-            "expected Closure, got {:?}",
-            self.tag
-        );
-        self.bits as u32
-    }
-
-    #[inline]
-    pub fn is_unit(&self) -> bool {
-        self.tag == ValueTag::Unit
+        debug_assert!(self.is_closure(), "expected Closure");
+        (self.0 & PAYLOAD_MASK) as u32
     }
 
     pub fn type_name(&self) -> &'static str {
-        match self.tag {
-            ValueTag::Unit => "Unit",
-            ValueTag::Bool => "Bool",
-            ValueTag::Int => "Int",
-            ValueTag::Float => "Float",
-            ValueTag::InternedString | ValueTag::DynamicString => "String",
-            ValueTag::Closure => "Closure",
+        if self.is_float() {
+            "Float"
+        } else {
+            match self.0 & TYPE_MASK {
+                QNAN_INT => "Int",
+                QNAN_BOOL => "Bool",
+                QNAN_UNIT => "Unit",
+                QNAN_INTERNED | QNAN_DYNSTR => "String",
+                QNAN_CLOSURE => "Closure",
+                _ => "Unknown",
+            }
         }
     }
 
     /// Display value as string (for results after execution).
     /// Panics if value is an interned string (should be materialized before returning).
     pub fn display(&self, heap: &Heap) -> String {
-        match self.tag {
-            ValueTag::Unit => "()".to_string(),
-            ValueTag::Bool => format!("{}", self.bits != 0),
-            ValueTag::Int => format!("{}", self.bits as i64),
-            ValueTag::Float => format!("{}", f64::from_bits(self.bits)),
-            ValueTag::InternedString => {
+        if self.is_float() {
+            return format!("{}", f64::from_bits(self.0));
+        }
+
+        match self.0 & TYPE_MASK {
+            QNAN_UNIT => "()".to_string(),
+            QNAN_BOOL => format!("{}", (self.0 & 1) != 0),
+            QNAN_INT => format!("{}", self.extract_signed_payload()),
+            QNAN_INTERNED => {
                 panic!("cannot display interned string without interner - should be materialized")
             }
-            ValueTag::DynamicString => heap.get_string(self.bits as u32).to_string(),
-            ValueTag::Closure => {
-                let closure = heap.get_closure(self.bits as u32);
+            QNAN_DYNSTR => {
+                let idx = (self.0 & PAYLOAD_MASK) as u32;
+                heap.get_string(idx).to_string()
+            }
+            QNAN_CLOSURE => {
+                let idx = (self.0 & PAYLOAD_MASK) as u32;
+                let closure = heap.get_closure(idx);
                 format!("<closure fn{}>", closure.func_idx)
             }
+            _ => "<unknown>".to_string(),
         }
     }
 
     /// Display value with interner (for use during execution with Echo).
     pub fn display_with_interner(&self, heap: &Heap, interner: &Rodeo) -> String {
-        match self.tag {
-            ValueTag::Unit => "()".to_string(),
-            ValueTag::Bool => format!("{}", self.bits != 0),
-            ValueTag::Int => format!("{}", self.bits as i64),
-            ValueTag::Float => format!("{}", f64::from_bits(self.bits)),
-            ValueTag::InternedString => {
-                let spur =
-                    Spur::try_from_usize(self.bits as usize).expect("invalid interned string spur");
+        if self.is_float() {
+            return format!("{}", f64::from_bits(self.0));
+        }
+
+        match self.0 & TYPE_MASK {
+            QNAN_UNIT => "()".to_string(),
+            QNAN_BOOL => format!("{}", (self.0 & 1) != 0),
+            QNAN_INT => format!("{}", self.extract_signed_payload()),
+            QNAN_INTERNED => {
+                let payload = (self.0 & PAYLOAD_MASK) as usize;
+                let spur = Spur::try_from_usize(payload).expect("invalid interned string spur");
                 interner.resolve(&spur).to_string()
             }
-            ValueTag::DynamicString => heap.get_string(self.bits as u32).to_string(),
-            ValueTag::Closure => {
-                let closure = heap.get_closure(self.bits as u32);
+            QNAN_DYNSTR => {
+                let idx = (self.0 & PAYLOAD_MASK) as u32;
+                heap.get_string(idx).to_string()
+            }
+            QNAN_CLOSURE => {
+                let idx = (self.0 & PAYLOAD_MASK) as u32;
+                let closure = heap.get_closure(idx);
                 format!("<closure fn{}>", closure.func_idx)
             }
+            _ => "<unknown>".to_string(),
         }
     }
 
     /// Structural equality, requires heap and interner for string comparison.
     pub fn eq(&self, other: &Value, heap: &Heap, interner: &Rodeo) -> bool {
-        match (self.tag, other.tag) {
-            (ValueTag::Unit, ValueTag::Unit) => true,
-            (ValueTag::Bool, ValueTag::Bool) | (ValueTag::Int, ValueTag::Int) => {
-                self.bits == other.bits
+        // Fast path: bitwise equal (works for all non-NaN types)
+        if self.0 == other.0 {
+            // For floats, NaN != NaN, so check that
+            if self.is_float() {
+                let f = f64::from_bits(self.0);
+                return !f.is_nan();
             }
-            (ValueTag::Float, ValueTag::Float) => {
-                let a = f64::from_bits(self.bits);
-                let b = f64::from_bits(other.bits);
-                a == b
-            }
-            // Fast path: both interned with same key
-            (ValueTag::InternedString, ValueTag::InternedString) if self.bits == other.bits => true,
-            // String comparison (any combination of interned/dynamic)
-            (
-                ValueTag::InternedString | ValueTag::DynamicString,
-                ValueTag::InternedString | ValueTag::DynamicString,
-            ) => {
-                let a = self.get_str(heap, interner);
-                let b = other.get_str(heap, interner);
-                a == b
-            }
-            (ValueTag::Closure, ValueTag::Closure) => {
-                let a = heap.get_closure(self.bits as u32);
-                let b = heap.get_closure(other.bits as u32);
-                if a.func_idx != b.func_idx {
-                    return false;
-                }
-                if a.captures.len() != b.captures.len() {
-                    return false;
-                }
-                for (ca, cb) in a.captures.iter().zip(b.captures.iter()) {
-                    if !ca.get().eq(&cb.get(), heap, interner) {
-                        return false;
-                    }
-                }
-                true
-            }
-            _ => false,
+            return true;
         }
+
+        // Different bits - check type match
+        let self_type = self.0 & TYPE_MASK;
+        let other_type = other.0 & TYPE_MASK;
+
+        // Floats
+        if self.is_float() && other.is_float() {
+            let a = f64::from_bits(self.0);
+            let b = f64::from_bits(other.0);
+            return a == b;
+        }
+
+        // String comparison (any combination of interned/dynamic)
+        if (self_type == QNAN_INTERNED || self_type == QNAN_DYNSTR)
+            && (other_type == QNAN_INTERNED || other_type == QNAN_DYNSTR)
+        {
+            let a = self.get_str(heap, interner);
+            let b = other.get_str(heap, interner);
+            return a == b;
+        }
+
+        // Closure comparison
+        if self_type == QNAN_CLOSURE && other_type == QNAN_CLOSURE {
+            let a_idx = (self.0 & PAYLOAD_MASK) as u32;
+            let b_idx = (other.0 & PAYLOAD_MASK) as u32;
+            let a = heap.get_closure(a_idx);
+            let b = heap.get_closure(b_idx);
+            if a.func_idx != b.func_idx {
+                return false;
+            }
+            if a.captures.len() != b.captures.len() {
+                return false;
+            }
+            for (ca, cb) in a.captures.iter().zip(b.captures.iter()) {
+                if !ca.get().eq(&cb.get(), heap, interner) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        false
     }
 
     /// Get string content (works for both interned and dynamic)
     fn get_str<'a>(&self, heap: &'a Heap, interner: &'a Rodeo) -> &'a str {
-        match self.tag {
-            ValueTag::InternedString => {
-                let spur =
-                    Spur::try_from_usize(self.bits as usize).expect("invalid interned string spur");
+        match self.0 & TYPE_MASK {
+            QNAN_INTERNED => {
+                let payload = (self.0 & PAYLOAD_MASK) as usize;
+                let spur = Spur::try_from_usize(payload).expect("invalid interned string spur");
                 interner.resolve(&spur)
             }
-            ValueTag::DynamicString => heap.get_string(self.bits as u32),
+            QNAN_DYNSTR => {
+                let idx = (self.0 & PAYLOAD_MASK) as u32;
+                heap.get_string(idx)
+            }
             _ => panic!("not a string"),
         }
     }
@@ -319,14 +371,18 @@ impl Value {
 
 impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.tag {
-            ValueTag::Unit => write!(f, "Unit"),
-            ValueTag::Bool => write!(f, "Bool({})", self.bits != 0),
-            ValueTag::Int => write!(f, "Int({})", self.bits as i64),
-            ValueTag::Float => write!(f, "Float({})", f64::from_bits(self.bits)),
-            ValueTag::InternedString => write!(f, "InternedString(spur={})", self.bits),
-            ValueTag::DynamicString => write!(f, "DynamicString(idx={})", self.bits),
-            ValueTag::Closure => write!(f, "Closure(idx={})", self.bits),
+        if self.is_float() {
+            return write!(f, "Float({})", f64::from_bits(self.0));
+        }
+
+        match self.0 & TYPE_MASK {
+            QNAN_UNIT => write!(f, "Unit"),
+            QNAN_BOOL => write!(f, "Bool({})", (self.0 & 1) != 0),
+            QNAN_INT => write!(f, "Int({})", self.extract_signed_payload()),
+            QNAN_INTERNED => write!(f, "InternedString(spur={})", self.0 & PAYLOAD_MASK),
+            QNAN_DYNSTR => write!(f, "DynamicString(idx={})", self.0 & PAYLOAD_MASK),
+            QNAN_CLOSURE => write!(f, "Closure(idx={})", self.0 & PAYLOAD_MASK),
+            _ => write!(f, "Unknown(0x{:016x})", self.0),
         }
     }
 }
@@ -412,8 +468,8 @@ impl Heap {
 
     /// Allocate a closure on the heap, returns index.
     pub fn alloc_closure(&mut self, func_idx: u32, captures: Vec<Value>) -> u32 {
-        // Estimate closure size: func_idx (4) + captures (16 * len) + box overhead (16)
-        let size = 4 + 16 * captures.len() + 16;
+        // Estimate closure size: func_idx (4) + captures (8 * len with NaN boxing) + box overhead (16)
+        let size = 4 + 8 * captures.len() + 16;
         let data = ClosureData {
             func_idx,
             captures: captures.into_iter().map(Cell::new).collect(),
@@ -457,26 +513,24 @@ impl Heap {
 
     /// Mark a value as reachable. Returns handles to trace if it's a closure.
     fn mark_value(&mut self, value: Value) -> Option<Vec<Value>> {
-        match value.tag() {
-            ValueTag::DynamicString => {
-                let idx = value.as_dynamic_string_idx().unwrap() as usize;
-                if idx < self.string_marks.len() && !self.string_marks[idx] {
-                    self.string_marks[idx] = true;
-                }
-                None
+        if value.is_dynamic_string() {
+            let idx = value.as_dynamic_string_idx().unwrap() as usize;
+            if idx < self.string_marks.len() && !self.string_marks[idx] {
+                self.string_marks[idx] = true;
             }
-            ValueTag::Closure => {
-                let idx = value.as_closure_idx().unwrap() as usize;
-                if idx < self.closure_marks.len() && !self.closure_marks[idx] {
-                    self.closure_marks[idx] = true;
-                    // Return captures to trace
-                    if let Some(closure) = &self.closures[idx] {
-                        return Some(closure.captures.iter().map(|c| c.get()).collect());
-                    }
+            None
+        } else if value.is_closure() {
+            let idx = value.as_closure_idx().unwrap() as usize;
+            if idx < self.closure_marks.len() && !self.closure_marks[idx] {
+                self.closure_marks[idx] = true;
+                // Return captures to trace
+                if let Some(closure) = &self.closures[idx] {
+                    return Some(closure.captures.iter().map(|c| c.get()).collect());
                 }
-                None
             }
-            _ => None, // Non-heap types
+            None
+        } else {
+            None // Non-heap types
         }
     }
 
@@ -510,7 +564,7 @@ impl Heap {
         // Sweep closures
         for (i, marked) in self.closure_marks.iter_mut().enumerate() {
             if !*marked && let Some(closure) = self.closures[i].take() {
-                let size = 4 + 16 * closure.captures.len() + 16;
+                let size = 4 + 8 * closure.captures.len() + 16;
                 bytes_freed += size as u64;
                 closures_freed += 1;
                 self.free_closures.push(i as u32);
@@ -546,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_value_size() {
-        assert_eq!(std::mem::size_of::<Value>(), 16);
+        assert_eq!(std::mem::size_of::<Value>(), 8);
     }
 
     #[test]
@@ -557,6 +611,41 @@ mod tests {
         assert_eq!(Value::int(42).as_int(), Some(42));
         assert_eq!(Value::int(-1).as_int(), Some(-1));
         assert_eq!(Value::float(2.5).as_float(), Some(2.5));
+    }
+
+    #[test]
+    fn test_int_edge_cases() {
+        // Test 48-bit signed range: -2^47 to 2^47-1
+        let max_48 = (1i64 << 47) - 1; // 140737488355327
+        let min_48 = -(1i64 << 47); // -140737488355328
+
+        assert_eq!(Value::int(max_48).as_int(), Some(max_48));
+        assert_eq!(Value::int(min_48).as_int(), Some(min_48));
+        assert_eq!(Value::int(0).as_int(), Some(0));
+        assert_eq!(Value::int(-1).as_int(), Some(-1));
+        assert_eq!(Value::int(1).as_int(), Some(1));
+    }
+
+    #[test]
+    fn test_float_special_values() {
+        // Normal floats
+        assert_eq!(Value::float(0.0).as_float(), Some(0.0));
+        assert_eq!(Value::float(-0.0).as_float(), Some(-0.0));
+        assert_eq!(Value::float(1.0).as_float(), Some(1.0));
+        assert_eq!(Value::float(-1.0).as_float(), Some(-1.0));
+
+        // Infinity
+        assert_eq!(Value::float(f64::INFINITY).as_float(), Some(f64::INFINITY));
+        assert_eq!(
+            Value::float(f64::NEG_INFINITY).as_float(),
+            Some(f64::NEG_INFINITY)
+        );
+
+        // NaN (special case - NaN != NaN but we should get a NaN back)
+        let nan_val = Value::float(f64::NAN);
+        let result = nan_val.as_float();
+        assert!(result.is_some());
+        assert!(result.unwrap().is_nan());
     }
 
     #[test]
