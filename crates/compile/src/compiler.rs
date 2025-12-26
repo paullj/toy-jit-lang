@@ -5,6 +5,50 @@ use mir::{BlockId, Inst, LocalId, Module, Operand, VReg};
 
 use crate::bytecode_writer::BytecodeWriter;
 use crate::chunk::{Chunk, CompiledModule};
+use crate::opcode::Opcode;
+
+/// Kind of jump instruction for patching
+#[derive(Clone, Copy)]
+enum JumpKind {
+    Jump,
+    JumpIf,
+    #[allow(dead_code)]
+    JumpIfNot,
+}
+
+impl JumpKind {
+    fn forward_opcode(self) -> Opcode {
+        match self {
+            JumpKind::Jump => Opcode::JumpFwd,
+            JumpKind::JumpIf => Opcode::JumpIfFwd,
+            JumpKind::JumpIfNot => Opcode::JumpIfNotFwd,
+        }
+    }
+
+    fn backward_opcode(self) -> Opcode {
+        match self {
+            JumpKind::Jump => Opcode::JumpBack,
+            JumpKind::JumpIf => Opcode::JumpIfBack,
+            JumpKind::JumpIfNot => Opcode::JumpIfNotBack,
+        }
+    }
+
+    /// Offset from opcode byte to the u16 offset field
+    fn offset_delta(self) -> usize {
+        match self {
+            JumpKind::Jump => 1,                         // opcode + offset
+            JumpKind::JumpIf | JumpKind::JumpIfNot => 2, // opcode + cond + offset
+        }
+    }
+
+    /// Total instruction size
+    fn inst_size(self) -> usize {
+        match self {
+            JumpKind::Jump => 3,                         // opcode + u16
+            JumpKind::JumpIf | JumpKind::JumpIfNot => 4, // opcode + cond + u16
+        }
+    }
+}
 
 pub fn compile(mir: &Module) -> CompiledModule {
     let mut strings = Rodeo::default();
@@ -37,8 +81,8 @@ struct Compiler<'a> {
     local_count: u8,
     block_labels: HashMap<BlockId, u32>,
     next_label: u32,
-    /// Pending jump patches: (bytecode offset to patch, label)
-    label_patches: Vec<(usize, u32)>,
+    /// Pending jump patches: (opcode offset, label, jump kind)
+    label_patches: Vec<(usize, u32, JumpKind)>,
     /// Label -> bytecode offset mapping
     label_positions: HashMap<u32, usize>,
 }
@@ -117,14 +161,24 @@ impl<'a> Compiler<'a> {
             }
         }
 
-        // Second pass: patch jump targets with relative offsets
-        for (patch_offset, label) in &self.label_patches {
+        // Second pass: patch jump targets with forward/backward opcodes and u16 offsets
+        for (opcode_offset, label, kind) in &self.label_patches {
             if let Some(&target_pos) = self.label_positions.get(label) {
-                // Calculate relative offset from the instruction AFTER the jump offset bytes
-                let from = (*patch_offset + 2) as isize;
+                // Calculate relative offset from instruction end
+                let inst_end = opcode_offset + kind.inst_size();
+                let from = inst_end as isize;
                 let to = target_pos as isize;
-                let relative = (to - from) as i16;
-                self.writer.patch_i16(*patch_offset, relative);
+                let relative = to - from;
+
+                let (opcode, offset) = if relative >= 0 {
+                    (kind.forward_opcode(), relative as u16)
+                } else {
+                    (kind.backward_opcode(), (-relative) as u16)
+                };
+
+                self.writer.patch_u8(*opcode_offset, opcode as u8);
+                self.writer
+                    .patch_u16(*opcode_offset + kind.offset_delta(), offset);
             }
         }
 
@@ -276,8 +330,9 @@ impl<'a> Compiler<'a> {
 
             Inst::Jump { target } => {
                 let label = self.get_or_create_label(*target);
-                let patch_offset = self.writer.emit_jump();
-                self.label_patches.push((patch_offset, label));
+                let opcode_offset = self.writer.emit_jump_placeholder();
+                self.label_patches
+                    .push((opcode_offset, label, JumpKind::Jump));
             }
             Inst::Branch {
                 cond,
@@ -289,12 +344,14 @@ impl<'a> Compiler<'a> {
                 let else_label = self.get_or_create_label(*else_bb);
 
                 // JumpIf cond -> then_bb
-                let patch_offset = self.writer.emit_jump_if(cond_slot);
-                self.label_patches.push((patch_offset, then_label));
+                let opcode_offset = self.writer.emit_jump_if_placeholder(cond_slot);
+                self.label_patches
+                    .push((opcode_offset, then_label, JumpKind::JumpIf));
 
                 // Jump -> else_bb
-                let patch_offset = self.writer.emit_jump();
-                self.label_patches.push((patch_offset, else_label));
+                let opcode_offset = self.writer.emit_jump_placeholder();
+                self.label_patches
+                    .push((opcode_offset, else_label, JumpKind::Jump));
             }
 
             Inst::Return { value } => {

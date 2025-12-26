@@ -44,33 +44,36 @@ pub enum Opcode {
     // Boolean (1)
     Not = 25, // dst:u8, src:u8
 
-    // Control flow (4)
-    Jump = 26,      // offset:i16 (signed, relative)
-    JumpIf = 27,    // cond:u8, offset:i16
-    JumpIfNot = 28, // cond:u8, offset:i16
+    // Control flow - jumps (6)
+    JumpFwd = 26,       // offset:u16 (forward, add to PC)
+    JumpBack = 27,      // offset:u16 (backward, subtract from PC)
+    JumpIfFwd = 28,     // cond:u8, offset:u16
+    JumpIfBack = 29,    // cond:u8, offset:u16
+    JumpIfNotFwd = 30,  // cond:u8, offset:u16
+    JumpIfNotBack = 31, // cond:u8, offset:u16
 
     // Calls (3)
-    Call = 29,         // dst:u8 (0xFF=none), func_idx:u16, arg_base:u8, arg_count:u8
-    CallIndirect = 30, // dst:u8, callee:u8, arg_base:u8, arg_count:u8
-    Return = 31,       // src:u8 (0xFF=none)
+    Call = 32,         // dst:u8 (0xFF=none), func_idx:u16, arg_base:u8, arg_count:u8
+    CallIndirect = 33, // dst:u8, callee:u8, arg_base:u8, arg_count:u8
+    Return = 34,       // src:u8 (0xFF=none)
 
     // Closures (3)
-    MakeClosure = 32,  // dst:u8, func_idx:u16, capture_base:u8, capture_count:u8
-    LoadCapture = 33,  // dst:u8, index:u8
-    StoreCapture = 34, // index:u8, src:u8
+    MakeClosure = 35,  // dst:u8, func_idx:u16, capture_base:u8, capture_count:u8
+    LoadCapture = 36,  // dst:u8, index:u8
+    StoreCapture = 37, // index:u8, src:u8
 
     // I/O (1)
-    Echo = 35, // src:u8
+    Echo = 38, // src:u8
 
     // End (1)
-    Halt = 36,
+    Halt = 39,
 }
 
 impl Opcode {
     /// Decode opcode from u8.
     #[inline(always)]
     pub fn from_u8(byte: u8) -> Option<Opcode> {
-        if byte <= Opcode::Halt as u8 {
+        if byte <= Self::Halt as u8 {
             // NOTE: We verified the byte is in range
             Some(unsafe { std::mem::transmute::<u8, opcode::Opcode>(byte) })
         } else {

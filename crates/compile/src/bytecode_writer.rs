@@ -29,11 +29,6 @@ impl BytecodeWriter {
     }
 
     #[inline]
-    fn write_i16(&mut self, v: i16) {
-        self.code.extend(v.to_le_bytes());
-    }
-
-    #[inline]
     fn write_u16(&mut self, v: u16) {
         self.code.extend(v.to_le_bytes());
     }
@@ -48,8 +43,13 @@ impl BytecodeWriter {
         self.write_u8(op as u8);
     }
 
-    /// Patch an i16 at a given offset.
-    pub fn patch_i16(&mut self, offset: usize, v: i16) {
+    /// Patch a u8 at a given offset.
+    pub fn patch_u8(&mut self, offset: usize, v: u8) {
+        self.code[offset] = v;
+    }
+
+    /// Patch a u16 at a given offset.
+    pub fn patch_u16(&mut self, offset: usize, v: u16) {
         self.code[offset..offset + 2].copy_from_slice(&v.to_le_bytes());
     }
 
@@ -240,31 +240,32 @@ impl BytecodeWriter {
         self.write_u8(src);
     }
 
-    /// Jump: offset:i16 (relative). Returns offset to patch.
-    pub fn emit_jump(&mut self) -> usize {
-        self.emit_op(Opcode::Jump);
-        let offset = self.code.len();
-        self.write_i16(0); // placeholder
-        offset
+    /// Jump placeholder: emits placeholder opcode + u16(0). Returns opcode offset.
+    /// Caller must patch both opcode (JumpFwd/JumpBack) and offset later.
+    pub fn emit_jump_placeholder(&mut self) -> usize {
+        let opcode_offset = self.code.len();
+        self.emit_op(Opcode::JumpFwd); // placeholder opcode
+        self.write_u16(0); // placeholder offset
+        opcode_offset
     }
 
-    /// JumpIf: cond:u8, offset:i16. Returns offset to patch.
-    pub fn emit_jump_if(&mut self, cond: u8) -> usize {
-        self.emit_op(Opcode::JumpIf);
+    /// JumpIf placeholder: cond:u8, emits placeholder opcode + u16(0). Returns opcode offset.
+    pub fn emit_jump_if_placeholder(&mut self, cond: u8) -> usize {
+        let opcode_offset = self.code.len();
+        self.emit_op(Opcode::JumpIfFwd); // placeholder opcode
         self.write_u8(cond);
-        let offset = self.code.len();
-        self.write_i16(0); // placeholder
-        offset
+        self.write_u16(0); // placeholder offset
+        opcode_offset
     }
 
-    /// JumpIfNot: cond:u8, offset:i16. Returns offset to patch.
+    /// JumpIfNot placeholder: cond:u8, emits placeholder opcode + u16(0). Returns opcode offset.
     #[allow(dead_code)]
-    pub fn emit_jump_if_not(&mut self, cond: u8) -> usize {
-        self.emit_op(Opcode::JumpIfNot);
+    pub fn emit_jump_if_not_placeholder(&mut self, cond: u8) -> usize {
+        let opcode_offset = self.code.len();
+        self.emit_op(Opcode::JumpIfNotFwd); // placeholder opcode
         self.write_u8(cond);
-        let offset = self.code.len();
-        self.write_i16(0); // placeholder
-        offset
+        self.write_u16(0); // placeholder offset
+        opcode_offset
     }
 
     /// Call: dst:u8 (0xFF=none), func_idx:u16, arg_base:u8, arg_count:u8

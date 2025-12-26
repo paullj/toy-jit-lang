@@ -48,16 +48,6 @@ impl BytecodeReader {
     }
 
     #[inline(always)]
-    pub fn read_i16(&mut self) -> i16 {
-        // NOTE: Caller ensures we don't read past end
-        unsafe {
-            let v = std::ptr::read_unaligned(self.ptr as *const i16);
-            self.ptr = self.ptr.add(2);
-            i16::from_le(v)
-        }
-    }
-
-    #[inline(always)]
     pub fn read_u16(&mut self) -> u16 {
         // NOTE: Caller ensures we don't read past end
         unsafe {
@@ -77,10 +67,17 @@ impl BytecodeReader {
         }
     }
 
-    /// Jump by a relative offset (can be negative)
+    /// Jump forward by offset bytes
     #[inline(always)]
-    pub fn jump_relative(&mut self, offset: i16) {
+    pub fn jump_forward(&mut self, offset: u16) {
         // NOTE: Compiler ensures jumps are within bounds
-        unsafe { self.ptr = self.ptr.offset(offset as isize) };
+        unsafe { self.ptr = self.ptr.add(offset as usize) };
+    }
+
+    /// Jump backward by offset bytes
+    #[inline(always)]
+    pub fn jump_backward(&mut self, offset: u16) {
+        // NOTE: Compiler ensures jumps are within bounds
+        unsafe { self.ptr = self.ptr.sub(offset as usize) };
     }
 }

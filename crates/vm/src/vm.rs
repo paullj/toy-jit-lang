@@ -362,23 +362,41 @@ impl<'a> Vm<'a> {
                     self.set(base, dst, result);
                 }
 
-                // Control flow
-                Opcode::Jump => {
-                    let offset = reader.read_i16();
-                    reader.jump_relative(offset);
+                // Control flow - jumps
+                Opcode::JumpFwd => {
+                    let offset = reader.read_u16();
+                    reader.jump_forward(offset);
                 }
-                Opcode::JumpIf => {
+                Opcode::JumpBack => {
+                    let offset = reader.read_u16();
+                    reader.jump_backward(offset);
+                }
+                Opcode::JumpIfFwd => {
                     let cond = reader.read_u8();
-                    let offset = reader.read_i16();
+                    let offset = reader.read_u16();
                     if self.get_bool(base, cond) {
-                        reader.jump_relative(offset);
+                        reader.jump_forward(offset);
                     }
                 }
-                Opcode::JumpIfNot => {
+                Opcode::JumpIfBack => {
                     let cond = reader.read_u8();
-                    let offset = reader.read_i16();
+                    let offset = reader.read_u16();
+                    if self.get_bool(base, cond) {
+                        reader.jump_backward(offset);
+                    }
+                }
+                Opcode::JumpIfNotFwd => {
+                    let cond = reader.read_u8();
+                    let offset = reader.read_u16();
                     if !self.get_bool(base, cond) {
-                        reader.jump_relative(offset);
+                        reader.jump_forward(offset);
+                    }
+                }
+                Opcode::JumpIfNotBack => {
+                    let cond = reader.read_u8();
+                    let offset = reader.read_u16();
+                    if !self.get_bool(base, cond) {
+                        reader.jump_backward(offset);
                     }
                 }
 

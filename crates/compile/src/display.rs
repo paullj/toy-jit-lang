@@ -160,22 +160,39 @@ fn disassemble_inst(code: &[u8], offset: usize, f: &mut fmt::Formatter<'_>) -> f
             let src = code[offset + 2];
             writeln!(f, "not s{} s{}", dst, src)
         }
-        Opcode::Jump => {
-            let rel_offset = i16::from_le_bytes([code[offset + 1], code[offset + 2]]);
-            let target = (offset as isize + 3 + rel_offset as isize) as usize;
-            writeln!(f, "jump @{}", target)
+        Opcode::JumpFwd => {
+            let rel_offset = u16::from_le_bytes([code[offset + 1], code[offset + 2]]);
+            let target = offset + 3 + rel_offset as usize;
+            writeln!(f, "jump.fwd @{}", target)
         }
-        Opcode::JumpIf => {
-            let cond = code[offset + 1];
-            let rel_offset = i16::from_le_bytes([code[offset + 2], code[offset + 3]]);
-            let target = (offset as isize + 4 + rel_offset as isize) as usize;
-            writeln!(f, "jump.if s{} @{}", cond, target)
+        Opcode::JumpBack => {
+            let rel_offset = u16::from_le_bytes([code[offset + 1], code[offset + 2]]);
+            let target = offset + 3 - rel_offset as usize;
+            writeln!(f, "jump.back @{}", target)
         }
-        Opcode::JumpIfNot => {
+        Opcode::JumpIfFwd => {
             let cond = code[offset + 1];
-            let rel_offset = i16::from_le_bytes([code[offset + 2], code[offset + 3]]);
-            let target = (offset as isize + 4 + rel_offset as isize) as usize;
-            writeln!(f, "jump.ifn s{} @{}", cond, target)
+            let rel_offset = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let target = offset + 4 + rel_offset as usize;
+            writeln!(f, "jump.if.fwd s{} @{}", cond, target)
+        }
+        Opcode::JumpIfBack => {
+            let cond = code[offset + 1];
+            let rel_offset = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let target = offset + 4 - rel_offset as usize;
+            writeln!(f, "jump.if.back s{} @{}", cond, target)
+        }
+        Opcode::JumpIfNotFwd => {
+            let cond = code[offset + 1];
+            let rel_offset = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let target = offset + 4 + rel_offset as usize;
+            writeln!(f, "jump.ifn.fwd s{} @{}", cond, target)
+        }
+        Opcode::JumpIfNotBack => {
+            let cond = code[offset + 1];
+            let rel_offset = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let target = offset + 4 - rel_offset as usize;
+            writeln!(f, "jump.ifn.back s{} @{}", cond, target)
         }
         Opcode::Call => {
             let dst = code[offset + 1];
@@ -269,16 +286,16 @@ fn inst_size(op: Opcode) -> usize {
         | Opcode::GtFloat
         | Opcode::GeFloat => 4, // op + dst + lhs + rhs
         Opcode::NegInt | Opcode::NegFloat | Opcode::Not => 3, // op + dst + src
-        Opcode::Jump => 3,      // op + offset:i16
-        Opcode::JumpIf | Opcode::JumpIfNot => 4, // op + cond + offset:i16
-        Opcode::Call => 6,      // op + dst + func:u16 + base + count
+        Opcode::JumpFwd | Opcode::JumpBack => 3, // op + offset:u16
+        Opcode::JumpIfFwd | Opcode::JumpIfBack | Opcode::JumpIfNotFwd | Opcode::JumpIfNotBack => 4, // op + cond + offset:u16
+        Opcode::Call => 6,         // op + dst + func:u16 + base + count
         Opcode::CallIndirect => 5, // op + dst + callee + base + count
-        Opcode::Return => 2,    // op + src
-        Opcode::MakeClosure => 6, // op + dst + func:u16 + base + count
-        Opcode::LoadCapture => 3, // op + dst + idx
+        Opcode::Return => 2,       // op + src
+        Opcode::MakeClosure => 6,  // op + dst + func:u16 + base + count
+        Opcode::LoadCapture => 3,  // op + dst + idx
         Opcode::StoreCapture => 3, // op + idx + src
-        Opcode::Echo => 2,      // op + src
-        Opcode::Halt => 1,      // op
+        Opcode::Echo => 2,         // op + src
+        Opcode::Halt => 1,         // op
     }
 }
 
