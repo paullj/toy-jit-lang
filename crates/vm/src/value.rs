@@ -96,6 +96,18 @@ impl Value {
         Self(QNAN_LIST | (idx as u64))
     }
 
+    /// Get raw bits for passing to/from JIT (NaN-boxed representation).
+    #[inline(always)]
+    pub const fn to_bits(self) -> i64 {
+        self.0 as i64
+    }
+
+    /// Reconstruct Value from JIT bits (NaN-boxed representation).
+    #[inline(always)]
+    pub const fn from_bits(raw: i64) -> Self {
+        Self(raw as u64)
+    }
+
     /// Check if this is a float (not NaN-boxed)
     #[inline(always)]
     pub fn is_float(&self) -> bool {

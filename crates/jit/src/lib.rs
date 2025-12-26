@@ -1,7 +1,9 @@
 mod error;
+mod runtime;
 mod translate;
 
 pub use error::JitError;
+pub use runtime::RuntimeContext;
 
 use std::collections::HashMap;
 
@@ -11,14 +13,6 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId as CraneliftFuncId, Linkage, Module};
 
 use translate::FunctionTranslator;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ReturnType {
-    #[default]
-    Integer,
-    Float,
-    Boolean,
-}
 
 pub struct Jit {
     builder_context: FunctionBuilderContext,
@@ -54,7 +48,14 @@ impl Jit {
             .finish(settings::Flags::new(flag_builder))
             .unwrap();
 
-        let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+
+        // Register runtime helpers for list operations
+        builder.symbol("rt_list_new", runtime::rt_list_new as *const u8);
+        builder.symbol("rt_list_set", runtime::rt_list_set as *const u8);
+        builder.symbol("rt_list_get", runtime::rt_list_get as *const u8);
+        builder.symbol("rt_list_slice", runtime::rt_list_slice as *const u8);
+
         let module = JITModule::new(builder);
 
         Self {
@@ -71,8 +72,13 @@ impl Jit {
     }
 
     /// Build signature for a MIR function
-    fn build_signature(&self, func: &mir::Function) -> Signature {
+    fn build_signature(&self, func: &mir::Function, is_main: bool) -> Signature {
         let mut sig = self.module.make_signature();
+
+        // Main function gets context pointer as first param
+        if is_main {
+            sig.params.push(AbiParam::new(self.ptr_type()));
+        }
 
         // Closure env pointer as hidden first param
         if func.is_closure {
@@ -94,14 +100,15 @@ impl Jit {
     pub fn compile_module(&mut self, mir: &mir::Module) -> Result<(), JitError> {
         // Pass 1: Declare all functions
         for func in &mir.functions {
-            let sig = self.build_signature(func);
+            let is_main = func.id == mir.main_id;
+            let sig = self.build_signature(func, is_main);
             let name = func
                 .name
                 .as_deref()
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| format!("_fn{}", func.id.0));
 
-            let linkage = if func.id == mir.main_id {
+            let linkage = if is_main {
                 Linkage::Export
             } else {
                 Linkage::Local
@@ -134,14 +141,15 @@ impl Jit {
         func: &mir::Function,
         mir_module: &mir::Module,
     ) -> Result<(), JitError> {
-        self.ctx.func.signature = self.build_signature(func);
+        let is_main = func.id == mir_module.main_id;
+        self.ctx.func.signature = self.build_signature(func, is_main);
 
         let cranelift_id = self.func_ids[&func.id];
 
         {
             let builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
 
-            let translator = FunctionTranslator::new_with_module_context(
+            let translator = FunctionTranslator::new(
                 builder,
                 &mut self.module,
                 &self.func_ids,
@@ -160,45 +168,5 @@ impl Jit {
     /// Get main function pointer for execution
     pub fn get_main(&self, main_id: mir::FuncId) -> Option<*const u8> {
         self.func_ptrs.get(&main_id).copied()
-    }
-
-    /// Legacy single-function compile for backwards compatibility
-    pub fn compile(
-        &mut self,
-        func: &mir::Function,
-        ret_type: ReturnType,
-    ) -> Result<*const u8, JitError> {
-        let return_ty = match ret_type {
-            ReturnType::Float => types::F64,
-            ReturnType::Integer | ReturnType::Boolean => self.module.target_config().pointer_type(),
-        };
-        self.ctx
-            .func
-            .signature
-            .returns
-            .push(AbiParam::new(return_ty));
-
-        let builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
-
-        let mut translator =
-            FunctionTranslator::new(builder, &mut self.module, func.local_count, ret_type);
-        translator.create_blocks(func);
-
-        for block in &func.blocks {
-            translator.translate_block(block);
-        }
-
-        translator.finalize();
-
-        let name = func.name.as_deref().unwrap_or("_main");
-        let id = self
-            .module
-            .declare_function(name, Linkage::Export, &self.ctx.func.signature)?;
-
-        self.module.define_function(id, &mut self.ctx)?;
-        self.module.clear_context(&mut self.ctx);
-        self.module.finalize_definitions()?;
-
-        Ok(self.module.get_finalized_function(id))
     }
 }

@@ -6,9 +6,11 @@ publish = false
 
 [dependencies]
 mir = { path = "../mir" }
-cranelift = "0.126.1"
-cranelift-jit = "0.126.1"
-cranelift-module = "0.126.1"
-cranelift-native = "0.126.1"
+vm = { path = "../vm" }
+lasso = "0.7"
+cranelift = "0.127.0"
+cranelift-jit = "0.127.0"
+cranelift-module = "0.127.0"
+cranelift-native = "0.127.0"
 target-lexicon = "0.13"
 thiserror = "2"

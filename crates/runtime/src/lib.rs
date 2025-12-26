@@ -5,7 +5,10 @@
 //! - JIT: Native compilation via Cranelift
 //! - Tiered: VM with hot-path JIT compilation (scaffolding for future)
 
+mod context;
 mod profiler;
+
+pub use context::RuntimeContext;
 
 use hir::{Definition, Expression, InfixOp, Item, Literal, LowerResult, PrefixOp};
 use infer::{InferenceResult, Type};
@@ -93,75 +96,48 @@ impl Runtime {
             .last()
             .map(|item| get_item_type(item, hir, inferred));
 
-        // Use new multi-function compilation if there are multiple functions
-        if mir_module.functions.len() > 1 {
-            jit_compiler.compile_module(mir_module)?;
+        jit_compiler.compile_module(mir_module)?;
 
-            let ptr = jit_compiler
-                .get_main(mir_module.main_id)
-                .expect("Main function not compiled");
+        let ptr = jit_compiler
+            .get_main(mir_module.main_id)
+            .expect("Main function not compiled");
 
-            let value = match result_type {
-                Some(Type::Float) => {
-                    let result: f64 = unsafe {
-                        let func: fn() -> f64 = std::mem::transmute(ptr);
-                        func()
-                    };
-                    Value::float(result)
-                }
-                Some(Type::Boolean) => {
-                    let result: i64 = unsafe {
-                        let func: fn() -> i64 = std::mem::transmute(ptr);
-                        func()
-                    };
-                    Value::bool(result != 0)
-                }
-                _ => {
-                    let result: i64 = unsafe {
-                        let func: fn() -> i64 = std::mem::transmute(ptr);
-                        func()
-                    };
-                    Value::int(result)
-                }
-            };
+        // Create runtime context for heap access during list operations
+        let mut context = jit::RuntimeContext::new(lasso::Rodeo::default());
 
-            Ok((value, Heap::new()))
-        } else {
-            // Legacy single-function path for backwards compatibility
-            let jit_ret_type = match result_type {
-                Some(Type::Float) => jit::ReturnType::Float,
-                Some(Type::Boolean) => jit::ReturnType::Boolean,
-                _ => jit::ReturnType::Integer,
-            };
+        // Call main with context pointer
+        // Note: JIT returns raw values for primitives, NaN-boxed for heap objects
+        let raw_result: i64 = unsafe {
+            let func: fn(*mut jit::RuntimeContext) -> i64 = std::mem::transmute(ptr);
+            func(&mut context as *mut jit::RuntimeContext)
+        };
 
-            let ptr = jit_compiler.compile(mir_module.main(), jit_ret_type)?;
+        let heap = context.take_heap();
 
-            let value = match result_type {
-                Some(Type::Float) => {
-                    let result: f64 = unsafe {
-                        let func: fn() -> f64 = std::mem::transmute(ptr);
-                        func()
-                    };
-                    Value::float(result)
+        // Interpret result based on type
+        // Note: List operations return NaN-boxed values, primitives return raw
+        let value = match result_type {
+            Some(Type::Float) => {
+                let result: f64 = f64::from_bits(raw_result as u64);
+                Value::float(result)
+            }
+            Some(Type::Boolean) => Value::bool(raw_result != 0),
+            _ => {
+                // Check if this is a NaN-boxed value (from list/heap operations)
+                // QNAN pattern: top 13 bits are 0xFFF8 or higher
+                let is_nan_boxed =
+                    (raw_result as u64 & 0xFFF8_0000_0000_0000) == 0xFFF8_0000_0000_0000;
+                if is_nan_boxed {
+                    // Already NaN-boxed (list, closure, or boxed int/bool)
+                    Value::from_bits(raw_result)
+                } else {
+                    // Raw integer from arithmetic
+                    Value::int(raw_result)
                 }
-                Some(Type::Boolean) => {
-                    let result: i64 = unsafe {
-                        let func: fn() -> i64 = std::mem::transmute(ptr);
-                        func()
-                    };
-                    Value::bool(result != 0)
-                }
-                _ => {
-                    let result: i64 = unsafe {
-                        let func: fn() -> i64 = std::mem::transmute(ptr);
-                        func()
-                    };
-                    Value::int(result)
-                }
-            };
+            }
+        };
 
-            Ok((value, Heap::new()))
-        }
+        Ok((value, heap))
     }
 
     fn execute_tiered(

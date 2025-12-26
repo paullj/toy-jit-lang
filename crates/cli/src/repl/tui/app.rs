@@ -146,7 +146,7 @@ impl ReplApp {
         infer: &infer::InferenceResult,
     ) -> Result<Option<String>, String> {
         let mir = mir::lower(lower, infer);
-        let mut jit = jit::Jit::new();
+        let mut jit_compiler = jit::Jit::new();
 
         // Determine return type from last item
         let result_type = lower
@@ -154,20 +154,24 @@ impl ReplApp {
             .last()
             .map(|item| get_item_type(item, lower, infer));
 
-        let jit_ret_type = match result_type {
-            Some(infer::Type::Float) => jit::ReturnType::Float,
-            Some(infer::Type::Boolean) => jit::ReturnType::Boolean,
-            _ => jit::ReturnType::Integer,
-        };
-
-        let func_ptr = jit
-            .compile(mir.main(), jit_ret_type)
+        jit_compiler
+            .compile_module(&mir)
             .map_err(|e| format!("JIT error: {:?}", e))?;
+
+        let func_ptr = jit_compiler
+            .get_main(mir.main_id)
+            .ok_or("Main function not compiled")?;
+
+        // Create runtime context and execute
+        let mut context = jit::RuntimeContext::new(lasso::Rodeo::default());
+        let raw_result: i64 = unsafe {
+            let func: fn(*mut jit::RuntimeContext) -> i64 = std::mem::transmute(func_ptr);
+            func(&mut context as *mut jit::RuntimeContext)
+        };
 
         // Execute and format result
         let result_str = if let Some(last_item) = lower.items.last() {
-            let ty = result_type.unwrap_or(infer::Type::Integer);
-            let result = execute_and_format(func_ptr, &ty);
+            let result = format_result(raw_result, result_type.as_ref(), &context.heap);
 
             match last_item {
                 hir::Item::Expression(_) => Some(result),
@@ -334,20 +338,23 @@ fn get_expr_type(
     }
 }
 
-fn execute_and_format(func_ptr: *const u8, ty: &infer::Type) -> String {
-    unsafe {
-        match ty {
-            infer::Type::Float => {
-                let f: fn() -> f64 = std::mem::transmute(func_ptr);
-                format!("{}", f())
-            }
-            infer::Type::Boolean => {
-                let f: fn() -> i64 = std::mem::transmute(func_ptr);
-                format!("{}", f() != 0)
-            }
-            _ => {
-                let f: fn() -> i64 = std::mem::transmute(func_ptr);
-                format!("{}", f())
+fn format_result(raw: i64, ty: Option<&infer::Type>, heap: &vm::Heap) -> String {
+    match ty {
+        Some(infer::Type::Float) => {
+            let f = f64::from_bits(raw as u64);
+            format!("{}", f)
+        }
+        Some(infer::Type::Boolean) => {
+            format!("{}", raw != 0)
+        }
+        _ => {
+            // Check if NaN-boxed (list or other heap value)
+            let is_nan_boxed = (raw as u64 & 0xFFF8_0000_0000_0000) == 0xFFF8_0000_0000_0000;
+            if is_nan_boxed {
+                let value = vm::Value::from_bits(raw);
+                value.display(heap).to_string()
+            } else {
+                format!("{}", raw)
             }
         }
     }
