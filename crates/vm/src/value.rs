@@ -110,6 +110,17 @@ impl Value {
         }
     }
 
+    /// Get bool value. Panics in debug if wrong type.
+    #[inline(always)]
+    pub fn as_bool_unchecked(&self) -> bool {
+        debug_assert!(
+            self.tag == ValueTag::Bool,
+            "expected Bool, got {:?}",
+            self.tag
+        );
+        self.bits != 0
+    }
+
     #[inline]
     pub fn as_int(&self) -> Option<i64> {
         if self.tag == ValueTag::Int {
@@ -119,6 +130,17 @@ impl Value {
         }
     }
 
+    /// Get int value. Panics in debug if wrong type.
+    #[inline(always)]
+    pub fn as_int_unchecked(&self) -> i64 {
+        debug_assert!(
+            self.tag == ValueTag::Int,
+            "expected Int, got {:?}",
+            self.tag
+        );
+        self.bits as i64
+    }
+
     #[inline]
     pub fn as_float(&self) -> Option<f64> {
         if self.tag == ValueTag::Float {
@@ -126,6 +148,17 @@ impl Value {
         } else {
             None
         }
+    }
+
+    /// Get float value. Panics in debug if wrong type.
+    #[inline(always)]
+    pub fn as_float_unchecked(&self) -> f64 {
+        debug_assert!(
+            self.tag == ValueTag::Float,
+            "expected Float, got {:?}",
+            self.tag
+        );
+        f64::from_bits(self.bits)
     }
 
     #[inline]
@@ -159,6 +192,17 @@ impl Value {
         } else {
             None
         }
+    }
+
+    /// Get closure index. Panics in debug if wrong type.
+    #[inline(always)]
+    pub fn as_closure_idx_unchecked(&self) -> u32 {
+        debug_assert!(
+            self.tag == ValueTag::Closure,
+            "expected Closure, got {:?}",
+            self.tag
+        );
+        self.bits as u32
     }
 
     #[inline]

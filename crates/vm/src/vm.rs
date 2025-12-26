@@ -24,7 +24,8 @@ pub struct Vm<'a> {
     chunks: &'a [Chunk],
     current_chunk: usize,
     pc: usize,
-    last_value: Value,
+    /// Cached stack base (updated on call/return)
+    stack_base: usize,
 }
 
 impl<'a> Vm<'a> {
@@ -43,14 +44,8 @@ impl<'a> Vm<'a> {
             chunks: &module.chunks,
             current_chunk: module.main_idx,
             pc: 0,
-            last_value: Value::unit(),
+            stack_base: 0, // main frame base is 0
         }
-    }
-
-    /// Get current frame's stack base (0 for main)
-    #[inline(always)]
-    fn stack_base(&self) -> usize {
-        self.frames.last().map(|f| f.stack_base).unwrap_or(0)
     }
 
     /// Convert slot index to absolute stack index
@@ -75,41 +70,28 @@ impl<'a> Vm<'a> {
         unsafe { *self.stack.get_unchecked_mut(idx) = value };
     }
 
-    /// Get int from slot
+    /// Get int from slot (unchecked in release)
     #[inline(always)]
-    fn get_int(&self, base: usize, slot: Slot) -> Result<i64, RuntimeError> {
-        let val = self.get(base, slot);
-        val.as_int().ok_or(RuntimeError::TypeMismatch {
-            expected: "Int",
-            got: val.type_name(),
-        })
+    fn get_int(&self, base: usize, slot: Slot) -> i64 {
+        self.get(base, slot).as_int_unchecked()
     }
 
-    /// Get float from slot
+    /// Get float from slot (unchecked in release)
     #[inline(always)]
-    fn get_float(&self, base: usize, slot: Slot) -> Result<f64, RuntimeError> {
-        let val = self.get(base, slot);
-        val.as_float().ok_or(RuntimeError::TypeMismatch {
-            expected: "Float",
-            got: val.type_name(),
-        })
+    fn get_float(&self, base: usize, slot: Slot) -> f64 {
+        self.get(base, slot).as_float_unchecked()
     }
 
-    /// Get bool from slot
+    /// Get bool from slot (unchecked in release)
     #[inline(always)]
-    fn get_bool(&self, base: usize, slot: Slot) -> Result<bool, RuntimeError> {
-        let val = self.get(base, slot);
-        val.as_bool().ok_or(RuntimeError::TypeMismatch {
-            expected: "Bool",
-            got: val.type_name(),
-        })
+    fn get_bool(&self, base: usize, slot: Slot) -> bool {
+        self.get(base, slot).as_bool_unchecked()
     }
 
-    /// Get closure index from slot
+    /// Get closure index from slot (unchecked in release)
     #[inline(always)]
-    fn get_closure_idx(&self, base: usize, slot: Slot) -> Result<u32, RuntimeError> {
-        let val = self.get(base, slot);
-        val.as_closure_idx().ok_or(RuntimeError::NotAClosure)
+    fn get_closure_idx(&self, base: usize, slot: Slot) -> u32 {
+        self.get(base, slot).as_closure_idx_unchecked()
     }
 
     /// Get current frame's closure index
@@ -133,7 +115,7 @@ impl<'a> Vm<'a> {
             .get(func_idx)
             .ok_or(RuntimeError::InvalidFunction(func_idx as u32))?;
 
-        let caller_base = self.stack_base();
+        let caller_base = self.stack_base; // Use cached value
 
         // New frame starts at current stack top
         let new_base = self.stack.len();
@@ -160,6 +142,7 @@ impl<'a> Vm<'a> {
             closure_idx,
         });
 
+        self.stack_base = new_base; // Update cache
         self.current_chunk = func_idx;
         self.pc = 0;
 
@@ -178,168 +161,140 @@ impl<'a> Vm<'a> {
             let inst = &chunk.instructions[self.pc];
             self.pc += 1;
 
-            // Cache stack base for this instruction
-            let base = self.stack_base();
+            // Use cached stack base for this instruction
+            let base = self.stack_base;
 
             match *inst {
                 // Loads
                 Instruction::LoadInt { dst, value } => {
                     let val = Value::int(value);
                     self.set(base, dst, val);
-                    self.last_value = val;
                 }
                 Instruction::LoadBool { dst, value } => {
                     let val = Value::bool(value);
                     self.set(base, dst, val);
-                    self.last_value = val;
                 }
                 Instruction::LoadConst { dst, idx } => {
                     let val = self.load_const(&chunk.constants, idx)?;
-                    self.last_value = val;
                     self.set(base, dst, val);
                 }
 
                 // Move
                 Instruction::Move { dst, src } => {
                     let val = self.get(base, src);
-                    self.last_value = val;
                     self.set(base, dst, val);
                 }
 
                 // Integer arithmetic
                 Instruction::AddInt { dst, lhs, rhs } => {
-                    let result = Value::int(self.get_int(base, lhs)? + self.get_int(base, rhs)?);
+                    let result = Value::int(self.get_int(base, lhs) + self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::SubInt { dst, lhs, rhs } => {
-                    let result = Value::int(self.get_int(base, lhs)? - self.get_int(base, rhs)?);
+                    let result = Value::int(self.get_int(base, lhs) - self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::MulInt { dst, lhs, rhs } => {
-                    let result = Value::int(self.get_int(base, lhs)? * self.get_int(base, rhs)?);
+                    let result = Value::int(self.get_int(base, lhs) * self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::DivInt { dst, lhs, rhs } => {
-                    let divisor = self.get_int(base, rhs)?;
+                    let divisor = self.get_int(base, rhs);
                     if divisor == 0 {
                         return Err(RuntimeError::DivisionByZero);
                     }
-                    let result = Value::int(self.get_int(base, lhs)? / divisor);
+                    let result = Value::int(self.get_int(base, lhs) / divisor);
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::ModInt { dst, lhs, rhs } => {
-                    let divisor = self.get_int(base, rhs)?;
+                    let divisor = self.get_int(base, rhs);
                     if divisor == 0 {
                         return Err(RuntimeError::DivisionByZero);
                     }
-                    let result = Value::int(self.get_int(base, lhs)? % divisor);
+                    let result = Value::int(self.get_int(base, lhs) % divisor);
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::NegInt { dst, src } => {
-                    let result = Value::int(-self.get_int(base, src)?);
+                    let result = Value::int(-self.get_int(base, src));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Float arithmetic
                 Instruction::AddFloat { dst, lhs, rhs } => {
                     let result =
-                        Value::float(self.get_float(base, lhs)? + self.get_float(base, rhs)?);
+                        Value::float(self.get_float(base, lhs) + self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::SubFloat { dst, lhs, rhs } => {
                     let result =
-                        Value::float(self.get_float(base, lhs)? - self.get_float(base, rhs)?);
+                        Value::float(self.get_float(base, lhs) - self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::MulFloat { dst, lhs, rhs } => {
                     let result =
-                        Value::float(self.get_float(base, lhs)? * self.get_float(base, rhs)?);
+                        Value::float(self.get_float(base, lhs) * self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::DivFloat { dst, lhs, rhs } => {
                     let result =
-                        Value::float(self.get_float(base, lhs)? / self.get_float(base, rhs)?);
+                        Value::float(self.get_float(base, lhs) / self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::NegFloat { dst, src } => {
-                    let result = Value::float(-self.get_float(base, src)?);
+                    let result = Value::float(-self.get_float(base, src));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Integer comparisons
                 Instruction::EqInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? == self.get_int(base, rhs)?);
+                    let result = Value::bool(self.get_int(base, lhs) == self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::NeInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? != self.get_int(base, rhs)?);
+                    let result = Value::bool(self.get_int(base, lhs) != self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::LtInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? < self.get_int(base, rhs)?);
+                    let result = Value::bool(self.get_int(base, lhs) < self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::LeInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? <= self.get_int(base, rhs)?);
+                    let result = Value::bool(self.get_int(base, lhs) <= self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::GtInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? > self.get_int(base, rhs)?);
+                    let result = Value::bool(self.get_int(base, lhs) > self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::GeInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? >= self.get_int(base, rhs)?);
+                    let result = Value::bool(self.get_int(base, lhs) >= self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Float comparisons
                 Instruction::LtFloat { dst, lhs, rhs } => {
-                    let result =
-                        Value::bool(self.get_float(base, lhs)? < self.get_float(base, rhs)?);
+                    let result = Value::bool(self.get_float(base, lhs) < self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::LeFloat { dst, lhs, rhs } => {
                     let result =
-                        Value::bool(self.get_float(base, lhs)? <= self.get_float(base, rhs)?);
+                        Value::bool(self.get_float(base, lhs) <= self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::GtFloat { dst, lhs, rhs } => {
-                    let result =
-                        Value::bool(self.get_float(base, lhs)? > self.get_float(base, rhs)?);
+                    let result = Value::bool(self.get_float(base, lhs) > self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
                 Instruction::GeFloat { dst, lhs, rhs } => {
                     let result =
-                        Value::bool(self.get_float(base, lhs)? >= self.get_float(base, rhs)?);
+                        Value::bool(self.get_float(base, lhs) >= self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Boolean
                 Instruction::Not { dst, src } => {
-                    let result = Value::bool(!self.get_bool(base, src)?);
+                    let result = Value::bool(!self.get_bool(base, src));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Control flow
@@ -347,12 +302,12 @@ impl<'a> Vm<'a> {
                     self.pc = target.0 as usize;
                 }
                 Instruction::JumpIf { cond, target } => {
-                    if self.get_bool(base, cond)? {
+                    if self.get_bool(base, cond) {
                         self.pc = target.0 as usize;
                     }
                 }
                 Instruction::JumpIfNot { cond, target } => {
-                    if !self.get_bool(base, cond)? {
+                    if !self.get_bool(base, cond) {
                         self.pc = target.0 as usize;
                     }
                 }
@@ -373,7 +328,7 @@ impl<'a> Vm<'a> {
                     arg_base,
                     arg_count,
                 } => {
-                    let closure_idx = self.get_closure_idx(base, callee)?;
+                    let closure_idx = self.get_closure_idx(base, callee);
                     let func_idx = self.heap.get_closure(closure_idx).func_idx as usize;
                     self.do_call(dst, func_idx, arg_base, arg_count, Some(closure_idx))?;
                 }
@@ -389,8 +344,9 @@ impl<'a> Vm<'a> {
                         self.current_chunk = frame.return_chunk;
                         self.pc = frame.return_pc;
 
-                        // Get caller's stack base before truncating
-                        let caller_base = self.stack_base();
+                        // Update stack_base to caller's base
+                        self.stack_base = self.frames.last().map(|f| f.stack_base).unwrap_or(0);
+                        let caller_base = self.stack_base;
 
                         // Truncate stack (deallocate this frame)
                         self.stack.truncate(frame.stack_base);
@@ -400,11 +356,10 @@ impl<'a> Vm<'a> {
                             let idx = caller_base + slot as usize;
                             self.stack[idx] = result;
                         }
-                        self.last_value = result;
                     } else {
                         // Return from main
-                        self.last_value = result;
-                        break;
+                        let result = self.materialize_value(result);
+                        return Ok((result, self.heap));
                     }
                 }
 
@@ -458,14 +413,13 @@ impl<'a> Vm<'a> {
 
                 // End
                 Instruction::Halt => {
-                    break;
+                    return Ok((Value::unit(), self.heap));
                 }
             }
         }
 
-        // Materialize interned strings in result so it's displayable without the interner
-        let result = self.materialize_value(self.last_value);
-        Ok((result, self.heap))
+        // Fell through without Return/Halt - shouldn't happen in well-formed code
+        Ok((Value::unit(), self.heap))
     }
 
     /// If value is an interned string, resolve it to a dynamic string.
