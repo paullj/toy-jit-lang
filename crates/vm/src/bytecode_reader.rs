@@ -23,12 +23,6 @@ impl BytecodeReader {
         unsafe { self.ptr.offset_from(self.start) as usize }
     }
 
-    #[inline(always)]
-    pub fn set_pc(&mut self, pc: usize) {
-        // NOTE: Caller ensures pc is valid within bytecode
-        unsafe { self.ptr = self.start.add(pc) };
-    }
-
     /// Read opcode (unchecked)
     #[inline(always)]
     pub fn read_opcode(&mut self) -> Opcode {
@@ -79,5 +73,13 @@ impl BytecodeReader {
     pub fn jump_backward(&mut self, offset: u16) {
         // NOTE: Compiler ensures jumps are within bounds
         unsafe { self.ptr = self.ptr.sub(offset as usize) };
+    }
+
+    /// Switch to different bytecode at given PC (avoids creating new reader)
+    #[inline(always)]
+    pub fn switch_code(&mut self, code: &[u8], pc: usize) {
+        self.start = code.as_ptr();
+        // NOTE: Caller ensures pc is valid within code
+        self.ptr = unsafe { code.as_ptr().add(pc) };
     }
 }

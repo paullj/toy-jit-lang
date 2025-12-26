@@ -107,6 +107,7 @@ impl<'a> Vm<'a> {
         }
     }
 
+    #[inline(always)]
     fn do_call(
         &mut self,
         reader: &mut BytecodeReader,
@@ -116,10 +117,9 @@ impl<'a> Vm<'a> {
         arg_count: u8,
         closure_idx: Option<u32>,
     ) -> Result<(), RuntimeError> {
-        let chunk = self
-            .chunks
-            .get(func_idx)
-            .ok_or(RuntimeError::InvalidFunction(func_idx as u32))?;
+        // SAFETY: func_idx validated at compile time; bounds checked in debug mode
+        debug_assert!(func_idx < self.chunks.len(), "invalid function index");
+        let chunk = unsafe { self.chunks.get_unchecked(func_idx) };
 
         let caller_base = self.stack_base; // Use cached value
 
@@ -133,15 +133,33 @@ impl<'a> Vm<'a> {
             return Err(RuntimeError::StackOverflow);
         }
 
-        // Initialize new frame slots to unit (args will be overwritten)
-        for i in new_base..new_top {
-            self.stack[i] = Value::unit();
+        // Copy args first, then zero remaining slots (avoids redundant zeroing)
+        let arg_start = caller_base + arg_base as usize;
+        match arg_count {
+            0 => {}
+            1 => {
+                self.stack[new_base] = self.stack[arg_start];
+            }
+            2 => {
+                self.stack[new_base] = self.stack[arg_start];
+                self.stack[new_base + 1] = self.stack[arg_start + 1];
+            }
+            3 => {
+                self.stack[new_base] = self.stack[arg_start];
+                self.stack[new_base + 1] = self.stack[arg_start + 1];
+                self.stack[new_base + 2] = self.stack[arg_start + 2];
+            }
+            _ => {
+                for i in 0..arg_count as usize {
+                    self.stack[new_base + i] = self.stack[arg_start + i];
+                }
+            }
         }
 
-        // Copy args to new frame's locals (slots 0..arg_count)
-        let arg_start = caller_base + arg_base as usize;
-        for i in 0..arg_count as usize {
-            self.stack[new_base + i] = self.stack[arg_start + i];
+        // Zero remaining slots (after args)
+        let arg_end = new_base + arg_count as usize;
+        for i in arg_end..new_top {
+            self.stack[i] = Value::unit();
         }
 
         self.stack_top = new_top;
@@ -163,7 +181,9 @@ impl<'a> Vm<'a> {
 
         self.stack_base = new_base; // Update cache
         self.current_chunk = func_idx;
-        reader.set_pc(0);
+
+        // Switch reader to new chunk code (avoids re-indexing after return)
+        reader.switch_code(&chunk.code, 0);
 
         Ok(())
     }
@@ -426,6 +446,7 @@ impl<'a> Vm<'a> {
                     let arg_base = reader.read_u8();
                     let arg_count = reader.read_u8();
                     let dst_opt = if dst == NO_SLOT { None } else { Some(dst) };
+                    // do_call switches reader to new chunk's code
                     self.do_call(
                         &mut reader,
                         dst_opt,
@@ -434,8 +455,6 @@ impl<'a> Vm<'a> {
                         arg_count,
                         None,
                     )?;
-                    // Switch reader to new chunk
-                    reader = BytecodeReader::new(&self.chunks[self.current_chunk].code);
                 }
 
                 Opcode::CallIndirect => {
@@ -446,6 +465,7 @@ impl<'a> Vm<'a> {
                     let closure_idx = self.get_closure_idx(base, callee);
                     let func_idx = self.heap.get_closure(closure_idx).func_idx as usize;
                     let dst_opt = if dst == NO_SLOT { None } else { Some(dst) };
+                    // do_call switches reader to new chunk's code
                     self.do_call(
                         &mut reader,
                         dst_opt,
@@ -454,8 +474,6 @@ impl<'a> Vm<'a> {
                         arg_count,
                         Some(closure_idx),
                     )?;
-                    // Switch reader to new chunk
-                    reader = BytecodeReader::new(&self.chunks[self.current_chunk].code);
                 }
 
                 Opcode::Return => {
@@ -490,9 +508,8 @@ impl<'a> Vm<'a> {
                             self.stack[idx] = result;
                         }
 
-                        // Switch reader back to caller's chunk and position
-                        reader = BytecodeReader::new(&self.chunks[self.current_chunk].code);
-                        reader.set_pc(frame.return_pc);
+                        // Switch reader back to caller's chunk and position (in-place)
+                        reader.switch_code(&self.chunks[self.current_chunk].code, frame.return_pc);
                     } else {
                         // Return from main
                         let result = self.materialize_value(result);
