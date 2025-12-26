@@ -133,6 +133,13 @@ impl BenchRunner {
         let result = vm::run(&compiled);
         timings.vm_exec = Some(start.elapsed());
 
+        // Extract GC stats from heap
+        if let Ok((_, ref heap)) = result {
+            let gc_stats = heap.stats();
+            timings.vm_gc_time = Some(gc_stats.gc_time);
+            timings.vm_gc_collections = Some(gc_stats.collections);
+        }
+
         BenchResult {
             timings: timings.clone(),
             code_size: code_size.clone(),

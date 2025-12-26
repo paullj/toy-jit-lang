@@ -130,6 +130,16 @@ impl Value {
         (self.0 & TYPE_MASK) == QNAN_CLOSURE
     }
 
+    /// Check if this value lives on the heap (dynamic string or closure).
+    /// Used by GC to filter roots efficiently.
+    #[inline(always)]
+    pub fn is_heap_value(&self) -> bool {
+        // Check if it's a NaN-boxed value with tag >= TAG_DYNSTR (101 or 110)
+        // This catches dynamic strings and closures in a single comparison
+        let tag = self.0 & TYPE_MASK;
+        tag == QNAN_DYNSTR || tag == QNAN_CLOSURE
+    }
+
     /// Check if this is any string type
     #[inline(always)]
     pub fn is_string(&self) -> bool {
@@ -397,6 +407,7 @@ pub struct ClosureData {
 #[derive(Debug, Clone, Default)]
 pub struct GcStats {
     pub collections: u64,
+    pub gc_time: std::time::Duration,
     pub bytes_freed: u64,
     pub strings_freed: u64,
     pub closures_freed: u64,
@@ -511,27 +522,40 @@ impl Heap {
         self.bytes_allocated
     }
 
-    /// Mark a value as reachable. Returns handles to trace if it's a closure.
-    fn mark_value(&mut self, value: Value) -> Option<Vec<Value>> {
-        if value.is_dynamic_string() {
-            let idx = value.as_dynamic_string_idx().unwrap() as usize;
-            if idx < self.string_marks.len() && !self.string_marks[idx] {
-                self.string_marks[idx] = true;
-            }
-            None
-        } else if value.is_closure() {
-            let idx = value.as_closure_idx().unwrap() as usize;
-            if idx < self.closure_marks.len() && !self.closure_marks[idx] {
-                self.closure_marks[idx] = true;
-                // Return captures to trace
-                if let Some(closure) = &self.closures[idx] {
-                    return Some(closure.captures.iter().map(|c| c.get()).collect());
+    /// Mark a value as reachable. Pushes any child references directly to worklist.
+    #[inline]
+    fn mark_value(&mut self, value: Value, worklist: &mut Vec<Value>) {
+        if let Some(idx) = value.as_dynamic_string_idx() {
+            let idx = idx as usize;
+            if idx < self.string_marks.len() {
+                // SAFETY: bounds checked above
+                unsafe {
+                    *self.string_marks.get_unchecked_mut(idx) = true;
                 }
             }
-            None
-        } else {
-            None // Non-heap types
+        } else if let Some(idx) = value.as_closure_idx() {
+            let idx = idx as usize;
+            if idx < self.closure_marks.len() {
+                // SAFETY: bounds checked above
+                let already_marked = unsafe { *self.closure_marks.get_unchecked(idx) };
+                if !already_marked {
+                    unsafe {
+                        *self.closure_marks.get_unchecked_mut(idx) = true;
+                    }
+                    // Push captures directly to worklist (no allocation)
+                    if let Some(closure) = &self.closures[idx] {
+                        for capture in closure.captures.iter() {
+                            let cap_val = capture.get();
+                            // Only push heap values to worklist
+                            if cap_val.is_heap_value() {
+                                worklist.push(cap_val);
+                            }
+                        }
+                    }
+                }
+            }
         }
+        // Non-heap types: nothing to mark
     }
 
     /// Mark phase: trace from roots and mark all reachable objects.
@@ -539,9 +563,7 @@ impl Heap {
         let mut worklist: Vec<Value> = roots.collect();
 
         while let Some(value) = worklist.pop() {
-            if let Some(captures) = self.mark_value(value) {
-                worklist.extend(captures);
-            }
+            self.mark_value(value, &mut worklist);
         }
     }
 
@@ -580,8 +602,10 @@ impl Heap {
 
     /// Run a full GC cycle with the given roots.
     pub fn collect(&mut self, roots: impl Iterator<Item = Value>) {
+        let start = std::time::Instant::now();
         self.mark(roots);
         self.sweep();
+        self.stats.gc_time += start.elapsed();
         self.stats.collections += 1;
         // Grow threshold to avoid thrashing
         self.gc_threshold = (self.bytes_allocated * GC_THRESHOLD_GROWTH).max(INITIAL_GC_THRESHOLD);

@@ -260,9 +260,10 @@ jobs:
             // Cross-language comparison (collapsed)
             try {
               const crossLang = JSON.parse(fs.readFileSync('cross-lang/results.json'));
-              body += '\n<details>\n<summary><b>Cross-Language Comparison (fib_30)</b></summary>\n\n';
-              body += '> [!WARNING]\n';
+              body += '### Cross-Language Comparison (fib_30)\n\n';
+              body += '> [!CAUTION]\n';
               body += '> Indicative only. Not suitable for direct performance comparisons.\n\n';
+              body += '\n<details>\n<summary><b>Details</b></summary>\n\n';
               body += '| Language | Exec Time |\n';
               body += '|----------|----------|\n';
               body += `| Go | ${formatMs(crossLang.go)} |\n`;
