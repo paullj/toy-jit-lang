@@ -1,0 +1,8 @@
+# Countdown using loop with break
+n := 10_000_000
+loop {
+    n = n - 1
+    if n == 0 { break }
+}
+echo n
+n

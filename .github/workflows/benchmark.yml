@@ -43,10 +43,6 @@ jobs:
         run: |
           cargo run --profile optimised-max -- bench --baseline benchmarks/baseline.json
 
-      # Run criterion benchmarks
-      - name: Criterion benchmarks
-        run: cargo bench --profile optimised-max --package bench
-
       # Cross-language benchmarks (indicative only)
       - name: Cross-language benchmarks
         run: |
@@ -87,7 +83,6 @@ jobs:
             benchmarks/current.json
             benchmarks/baseline.json
             benchmarks/cross-lang/results.json
-            target/criterion/
 
       # Update baseline on main/dev branch pushes
       - name: Update baseline
@@ -137,10 +132,10 @@ jobs:
             };
 
             try {
-              const currentData = JSON.parse(fs.readFileSync('benchmarks/current.json'));
+              const currentData = JSON.parse(fs.readFileSync('current.json'));
               let baselineData = null;
               try {
-                baselineData = JSON.parse(fs.readFileSync('benchmarks/baseline.json'));
+                baselineData = JSON.parse(fs.readFileSync('baseline.json'));
               } catch (e) {}
 
               const iterations = currentData.iterations || 15;
@@ -177,9 +172,9 @@ jobs:
 
               body += `**${iterations} iterations per script (5 warmup)**\n\n`;
 
-              // Main summary table: Script | Compilation | Execution | Total
-              body += '| Script | Compilation | Execution | Total |\n';
-              body += '|--------|-------------|-----------|-------|\n';
+              // Main summary table: Script | Compilation | VM Exec | JIT Exec | Total
+              body += '| Script | Compilation | VM Exec | JIT Exec | Total |\n';
+              body += '|--------|-------------|---------|----------|-------|\n';
 
               for (const [name, data] of Object.entries(current)) {
                 const base = baseline?.[name];
@@ -196,13 +191,15 @@ jobs:
                   (getBaseValue(base, 'mir_avg_us', 'mir_us') || 0) +
                   (getBaseValue(base, 'compile_avg_us', 'compile_us') || 0) : null;
 
-                // Execution = jit_exec (prefer JIT)
-                const execution = data.jit_exec_avg_us || data.vm_exec_avg_us || 0;
-                const baseExecution = base ?
-                  (getBaseValue(base, 'jit_exec_avg_us', 'jit_exec_us') ||
-                   getBaseValue(base, 'vm_exec_avg_us', 'vm_exec_us') || 0) : null;
+                // VM Execution
+                const vmExec = data.vm_exec_avg_us || 0;
+                const baseVmExec = base ? (getBaseValue(base, 'vm_exec_avg_us', 'vm_exec_us') || 0) : null;
 
-                // Total
+                // JIT Execution
+                const jitExec = data.jit_exec_avg_us || 0;
+                const baseJitExec = base ? (getBaseValue(base, 'jit_exec_avg_us', 'jit_exec_us') || 0) : null;
+
+                // Total (prefer JIT)
                 const total = data.jit_total_avg_us || data.vm_total_avg_us || 0;
                 const baseTotal = base ?
                   (getBaseValue(base, 'jit_total_avg_us', 'jit_total_us') ||
@@ -210,7 +207,8 @@ jobs:
 
                 body += `| ${name} `;
                 body += `| ${formatCell(compilation, baseCompilation)} `;
-                body += `| ${formatCell(execution, baseExecution)} `;
+                body += `| ${formatCell(vmExec, baseVmExec)} `;
+                body += `| ${formatCell(jitExec, baseJitExec)} `;
                 body += `| ${formatCell(total, baseTotal)} |\n`;
               }
 
@@ -261,7 +259,7 @@ jobs:
 
             // Cross-language comparison (collapsed)
             try {
-              const crossLang = JSON.parse(fs.readFileSync('benchmarks/cross-lang/results.json'));
+              const crossLang = JSON.parse(fs.readFileSync('cross-lang/results.json'));
               body += '\n<details>\n<summary><b>Cross-Language Comparison (fib_30)</b></summary>\n\n';
               body += '> [!WARNING]\n';
               body += '> Indicative only. Not suitable for direct performance comparisons.\n\n';

@@ -1,0 +1,5 @@
+fn greeting(message) {
+    echo message
+}
+
+greeting("Hey!")

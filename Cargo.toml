@@ -37,3 +37,7 @@ strip = true
 [profile.optimised-max]
 inherits = "optimised"
 lto = "fat"
+
+[profile.profiling]
+inherits = "release"
+debug = true

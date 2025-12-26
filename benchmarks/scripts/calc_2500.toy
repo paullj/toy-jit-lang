@@ -1,0 +1,22 @@
+# Nested loops: 50x50 iterations
+sum := 0
+i := 0
+x := 0
+n := 2500
+fn calculation(a, b) {
+    x = x + 1
+    a * b + a - b * x
+}
+
+loop {
+    if i >= n { break }
+    j := 0
+    loop {
+        if j >= n { break }
+        sum = sum + calculation(i, j)
+        j = j + 1
+    }
+    i = i + 1
+}
+echo sum
+sum

@@ -4,6 +4,7 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeError {
     DivisionByZero,
+    StackOverflow,
     InvalidRegister(u32),
     InvalidLocal(u32),
     InvalidConstant(u32),
@@ -25,6 +26,7 @@ impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RuntimeError::DivisionByZero => write!(f, "division by zero"),
+            RuntimeError::StackOverflow => write!(f, "stack overflow"),
             RuntimeError::InvalidRegister(r) => write!(f, "invalid register r{}", r),
             RuntimeError::InvalidLocal(l) => write!(f, "invalid local slot{}", l),
             RuntimeError::InvalidConstant(c) => write!(f, "invalid constant c{}", c),
