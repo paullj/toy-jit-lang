@@ -132,10 +132,10 @@ jobs:
             };
 
             try {
-              const currentData = JSON.parse(fs.readFileSync('benchmarks/current.json'));
+              const currentData = JSON.parse(fs.readFileSync('current.json'));
               let baselineData = null;
               try {
-                baselineData = JSON.parse(fs.readFileSync('benchmarks/baseline.json'));
+                baselineData = JSON.parse(fs.readFileSync('baseline.json'));
               } catch (e) {}
 
               const iterations = currentData.iterations || 15;
@@ -256,7 +256,7 @@ jobs:
 
             // Cross-language comparison (collapsed)
             try {
-              const crossLang = JSON.parse(fs.readFileSync('benchmarks/cross-lang/results.json'));
+              const crossLang = JSON.parse(fs.readFileSync('cross-lang/results.json'));
               body += '\n<details>\n<summary><b>Cross-Language Comparison (fib_30)</b></summary>\n\n';
               body += '> [!WARNING]\n';
               body += '> Indicative only. Not suitable for direct performance comparisons.\n\n';
