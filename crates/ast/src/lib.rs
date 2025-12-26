@@ -18,6 +18,7 @@ pub enum Item {
     FunctionDefinition(FunctionDefinition),
     VariableDefinition(VariableDefinition),
     VariableAssignment(VariableAssignment),
+    IndexAssignment(IndexAssignment),
     ReturnStatement(ReturnStatement),
     EchoStatement(EchoStatement),
     BreakStatement(BreakStatement),
@@ -31,6 +32,7 @@ impl Item {
             SyntaxKind::FunctionDefinition => Self::FunctionDefinition(FunctionDefinition(node)),
             SyntaxKind::VariableDefinition => Self::VariableDefinition(VariableDefinition(node)),
             SyntaxKind::VariableAssignment => Self::VariableAssignment(VariableAssignment(node)),
+            SyntaxKind::IndexAssignment => Self::IndexAssignment(IndexAssignment(node)),
             SyntaxKind::ReturnStatement => Self::ReturnStatement(ReturnStatement(node)),
             SyntaxKind::EchoStatement => Self::EchoStatement(EchoStatement(node)),
             SyntaxKind::BreakStatement => Self::BreakStatement(BreakStatement(node)),
@@ -45,6 +47,7 @@ impl Item {
             Item::FunctionDefinition(n) => n.syntax(),
             Item::VariableDefinition(n) => n.syntax(),
             Item::VariableAssignment(n) => n.syntax(),
+            Item::IndexAssignment(n) => n.syntax(),
             Item::ReturnStatement(n) => n.syntax(),
             Item::EchoStatement(n) => n.syntax(),
             Item::BreakStatement(n) => n.syntax(),
@@ -97,6 +100,9 @@ pub enum Expression {
     While(WhileExpression),
     Function(FunctionExpression),
     Call(CallExpression),
+    List(ListExpression),
+    Index(IndexExpression),
+    Slice(SliceExpression),
 }
 
 impl Expression {
@@ -113,6 +119,9 @@ impl Expression {
             SyntaxKind::WhileExpression => Self::While(WhileExpression(node)),
             SyntaxKind::FunctionExpression => Self::Function(FunctionExpression(node)),
             SyntaxKind::CallExpression => Self::Call(CallExpression(node)),
+            SyntaxKind::ListExpression => Self::List(ListExpression(node)),
+            SyntaxKind::IndexExpression => Self::Index(IndexExpression(node)),
+            SyntaxKind::SliceExpression => Self::Slice(SliceExpression(node)),
             _ => return None,
         };
         Some(result)
@@ -131,6 +140,9 @@ impl Expression {
             Expression::While(n) => n.syntax(),
             Expression::Function(n) => n.syntax(),
             Expression::Call(n) => n.syntax(),
+            Expression::List(n) => n.syntax(),
+            Expression::Index(n) => n.syntax(),
+            Expression::Slice(n) => n.syntax(),
         }
     }
 }
@@ -561,6 +573,114 @@ impl ContinueStatement {
             .children_with_tokens()
             .filter_map(SyntaxElement::into_token)
             .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+}
+
+// ========================================
+// List expressions
+// ========================================
+
+ast_node!(ListExpression, SyntaxKind::ListExpression);
+
+impl ListExpression {
+    /// Iterator over all elements in the list literal
+    pub fn elements(&self) -> impl Iterator<Item = Expression> {
+        self.0.children().filter_map(Expression::cast)
+    }
+}
+
+ast_node!(IndexExpression, SyntaxKind::IndexExpression);
+
+impl IndexExpression {
+    /// The collection being indexed (e.g., `arr` in `arr[0]`)
+    pub fn collection(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// The index expression (e.g., `0` in `arr[0]`)
+    pub fn index(&self) -> Option<Expression> {
+        self.0.children().filter_map(Expression::cast).nth(1)
+    }
+}
+
+ast_node!(SliceExpression, SyntaxKind::SliceExpression);
+
+impl SliceExpression {
+    /// The collection being sliced
+    pub fn collection(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// The start index (None for `[..end]`)
+    pub fn start(&self) -> Option<Expression> {
+        // Start is the second expression (after collection) that appears before DotDot
+        // Tree: [collection, start?, DotDot, end?]
+        let mut saw_dotdot = false;
+        let mut is_first = true;
+        for child in self.0.children_with_tokens() {
+            match child {
+                SyntaxElement::Token(t) if t.kind() == SyntaxKind::DotDot => {
+                    saw_dotdot = true;
+                }
+                SyntaxElement::Node(n) if !saw_dotdot => {
+                    if is_first {
+                        // Skip the collection (first expression)
+                        is_first = false;
+                    } else {
+                        // This is the start expression
+                        return Expression::cast(n);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The end index (None for `[start..]`)
+    pub fn end(&self) -> Option<Expression> {
+        // End is the expression after DotDot (if any)
+        let mut saw_dotdot = false;
+        for child in self.0.children_with_tokens() {
+            match child {
+                SyntaxElement::Token(t) if t.kind() == SyntaxKind::DotDot => {
+                    saw_dotdot = true;
+                }
+                SyntaxElement::Node(n) if saw_dotdot => {
+                    return Expression::cast(n);
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+}
+
+ast_node!(IndexAssignment, SyntaxKind::IndexAssignment);
+
+impl IndexAssignment {
+    /// Get the target - either an IndexExpression or SliceExpression
+    pub fn target(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// Get the value being assigned
+    pub fn value(&self) -> Option<Expression> {
+        self.0.children().filter_map(Expression::cast).nth(1)
+    }
+}
+
+ast_node!(ListType, SyntaxKind::ListType);
+
+impl ListType {
+    /// The element type (e.g., `int` in `list[int]`)
+    pub fn element_type(&self) -> Option<TypeAnnotation> {
+        self.0.children().find_map(TypeAnnotation::cast)
+    }
+
+    /// For nested lists, get the inner ListType
+    pub fn inner_list_type(&self) -> Option<ListType> {
+        self.0.children().find_map(ListType::cast)
     }
 }
 

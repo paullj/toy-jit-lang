@@ -1,0 +1,142 @@
+# Comments are preceded by the # symbol
+# Comments support markdown formatting, such as **bold** and _italic_. They also support code blocks:
+# ```
+# fn example() {
+#     # code here
+# }
+# ```
+# Comments can also include links, such as [this one](https://example.com).
+# Comments above code blocks are associated with the following code element.
+
+# Variables are defined with the := operator
+my_int : int = 5
+float my_float := 3.14
+bool my_bool := false
+string my_string := "Hello, World!"
+
+# Most of the time, types can be omitted and inferred
+my_bool := true
+
+# Reassigning variables is done with the = operator
+my_int = 10
+
+# Blocks are defined with curly braces
+# Variables defined inside a block are scoped to that block
+{
+    int temp := my_int * 2
+    my_float = my_float + float(temp)
+}
+
+# Blocks can also be used as expressions
+my_float = {
+    my_float * 1.5
+    my_float
+}
+
+# Function definitions must specify parameter and return types
+fn add(int a, int b) int {
+    int x := a
+    y := 0
+    y = b
+
+    # The last expression is the return value
+    x + y
+}
+
+# If stateements, for loops, and match expressions are supported
+if my_bool {
+    my_int = add(2, 3)
+} else if my_int > 10 and my_float < 5.0 {
+    my_int = add(5, 7)
+}
+
+for i in 0..my_int {
+    my_float = my_float + 1.0
+}
+
+while my_int < 20 {
+    my_int = my_int + 1
+}
+
+loop {
+    my_int = my_int + 2
+    if my_int >= 30 {
+        break
+    }
+}
+
+match my_var {
+    true -> 3
+    false -> {
+        5
+    }
+    _ -> 12
+}
+
+# If statements, for loops, and match expressions can also be used as expressions
+my_int = if my_bool { 1 } else { 0 }
+my_float = for i in 0..5 { my_float + 2.0 }
+my_int = match my_bool {
+    true -> 42
+    false -> 24
+}
+
+# Structs can be defined with the type keyword
+type Point = {
+    float x
+    float y
+}
+
+# Instances of structs are created with the struct name followed by curly braces
+Point p := Point {
+    x: 1.0
+    y: 2.0
+}
+
+# Struct fields are accessed with the . operator
+float px := p.x
+float py := p.y
+
+# Enums can also be defined with the type keyword
+type OptionInt = Some(int) | None
+
+# Type aliases can be created with the type keyword
+type NewInt = int
+
+# Aliases can not be used interchangeably with the original type
+NewInt my_alias_int := 42
+
+# my_int = my_alias_int  # This would be a type error
+
+# Generics are supported in type definitions and function definitions
+type Wrapper[T] = {
+    T value
+}
+
+fn wrap[T](T val) Wrapper[T] {
+    Wrapper[T] {
+        value: val
+    }
+}
+
+# Tuples are defined with parentheses
+tuple[int, float, string] my_tuple := (1, 2.0, "three")
+
+# Tuple elements are accessed with the . operator followed by the index
+int first := my_tuple.0
+float second := my_tuple.1
+string third := my_tuple.2
+
+# Destructuring can be used to unpack tuples
+(a, b, c) := my_tuple
+
+# Destructuring can also be used with structs
+Point { x: px, y: py } := p
+
+# Now px and py are assigned the values of p.x and p.y respectively
+float new_px := px
+
+# Destructuring is also supported in function parameters
+fn sum_point(Point { x, y }: Point) {
+    x + y
+}

@@ -332,6 +332,40 @@ impl BytecodeWriter {
     pub fn emit_halt(&mut self) {
         self.emit_op(Opcode::Halt);
     }
+
+    // === List operations ===
+
+    /// ListNew: dst:u8, capacity:u8
+    pub fn emit_list_new(&mut self, dst: u8, capacity: u8) {
+        self.emit_op(Opcode::ListNew);
+        self.write_u8(dst);
+        self.write_u8(capacity);
+    }
+
+    /// ListSet: list:u8, index:u8, value:u8
+    pub fn emit_list_set(&mut self, list: u8, index: u8, value: u8) {
+        self.emit_op(Opcode::ListSet);
+        self.write_u8(list);
+        self.write_u8(index);
+        self.write_u8(value);
+    }
+
+    /// ListGet: dst:u8, list:u8, index:u8
+    pub fn emit_list_get(&mut self, dst: u8, list: u8, index: u8) {
+        self.emit_op(Opcode::ListGet);
+        self.write_u8(dst);
+        self.write_u8(list);
+        self.write_u8(index);
+    }
+
+    /// ListSlice: dst:u8, list:u8, start:u8, end:u8
+    pub fn emit_list_slice(&mut self, dst: u8, list: u8, start: u8, end: u8) {
+        self.emit_op(Opcode::ListSlice);
+        self.write_u8(dst);
+        self.write_u8(list);
+        self.write_u8(start);
+        self.write_u8(end);
+    }
 }
 
 impl Default for BytecodeWriter {

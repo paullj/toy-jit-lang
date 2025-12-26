@@ -418,6 +418,52 @@ impl<'a> Compiler<'a> {
                 let src_slot = self.load_operand(src);
                 self.writer.emit_echo(src_slot);
             }
+
+            // List operations
+            Inst::ListNew { dst, capacity } => {
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.writer.emit_list_new(dst_slot, *capacity as u8);
+            }
+            Inst::ListSet { list, index, value } => {
+                let list_slot = self.load_operand(list);
+                let index_slot = self.load_operand(index);
+                let value_slot = self.load_operand(value);
+                self.writer.emit_list_set(list_slot, index_slot, value_slot);
+            }
+            Inst::ListGet { dst, list, index } => {
+                let list_slot = self.load_operand(list);
+                let index_slot = self.load_operand(index);
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.writer.emit_list_get(dst_slot, list_slot, index_slot);
+            }
+            Inst::ListSlice {
+                dst,
+                list,
+                start,
+                end,
+            } => {
+                let list_slot = self.load_operand(list);
+                // Use SLICE_MISSING sentinel for "missing" bounds
+                let start_slot = match start {
+                    Some(s) => self.load_operand(s),
+                    None => {
+                        let slot = self.alloc_slot();
+                        self.writer.emit_load_int(slot, crate::SLICE_MISSING);
+                        slot
+                    }
+                };
+                let end_slot = match end {
+                    Some(e) => self.load_operand(e),
+                    None => {
+                        let slot = self.alloc_slot();
+                        self.writer.emit_load_int(slot, crate::SLICE_MISSING);
+                        slot
+                    }
+                };
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.writer
+                    .emit_list_slice(dst_slot, list_slot, start_slot, end_slot);
+            }
         }
     }
 

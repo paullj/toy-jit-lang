@@ -62,8 +62,11 @@ pub fn token_style(kind: TokenKind) -> Style {
         | TokenKind::RightParenthesis
         | TokenKind::LeftBrace
         | TokenKind::RightBrace
+        | TokenKind::LeftBracket
+        | TokenKind::RightBracket
         | TokenKind::Comma
-        | TokenKind::Colon => Style::default().fg(Color::DarkGray),
+        | TokenKind::Colon
+        | TokenKind::DotDot => Style::default().fg(Color::DarkGray),
 
         // Comments
         TokenKind::Comment | TokenKind::DocComment => Style::default().fg(Color::DarkGray),

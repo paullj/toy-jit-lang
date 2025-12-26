@@ -11,4 +11,5 @@ compile = { path = "../compile" }
 vm = { path = "../vm" }
 infer = { path = "../infer" }
 hir = { path = "../hir" }
+lasso = "0.7"
 thiserror = "2.0"

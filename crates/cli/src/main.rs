@@ -13,9 +13,7 @@ use commands::{
 };
 use styles::STYLES;
 
-const HELP_TEMPLATE: &str = "  ╭───╮
-  │^_^│  {about}
-  ╰───╯
+const HELP_TEMPLATE: &str = "  ʕ•ᴥ•ʔ {about}
 
 {usage-heading} {usage}
 

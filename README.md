@@ -34,6 +34,16 @@ toy is a simple programming language that is made for fun.
   * hover for variables doesn't show type in blocks
   * infer has some stuff in there which is not related to type inference
 
+* improvements
+  * handle postfix operators in parser better
+    * should be the same as prefix operators
+  * is_bracket_index_not_list() uses speculative (re)lexing to check if [...] contains a comma (ie list) or not (ie index/slice)
+    * maybe do this in a cleaner way?
+    * feels weird to re lex
+
+  * tests for runtime vs jit consistency
+    * make sure they produce the same results for same inputs
+
 * more helpful warnings
   * doc comments which are not attached to anything
     * suggest attaching them to the next function/variable definition/doccomment
@@ -44,12 +54,10 @@ toy is a simple programming language that is made for fun.
 
 * clean up
   * maybe make cli just a cli and move all the logic elsewhere
-
-* control flow
-  * loops
-    * while
-    * for x in y
-    * loop
+  * review docs
+    * make it read better
+    * add more examples
+    * unsure if i should make the docs have useful examples or just focus on language features
 
 * tiered execution
   * interpret code first
@@ -57,11 +65,18 @@ toy is a simple programming language that is made for fun.
   * jit compile hot paths
 
 * garbage collection improvements
+  * but what?
 
+* for loops
 * structs
 * tuples
 * enums
 * traits / interfaces
+
+* exceptions / error handling
+  * try/catch
+  * result type
+  * option type
 
 * pattern matching
 

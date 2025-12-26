@@ -253,6 +253,30 @@ fn disassemble_inst(code: &[u8], offset: usize, f: &mut fmt::Formatter<'_>) -> f
             let src = code[offset + 1];
             writeln!(f, "echo s{}", src)
         }
+        Opcode::ListNew => {
+            let dst = code[offset + 1];
+            let capacity = code[offset + 2];
+            writeln!(f, "list.new s{} {}", dst, capacity)
+        }
+        Opcode::ListSet => {
+            let list = code[offset + 1];
+            let index = code[offset + 2];
+            let value = code[offset + 3];
+            writeln!(f, "list.set s{} {} s{}", list, index, value)
+        }
+        Opcode::ListGet => {
+            let dst = code[offset + 1];
+            let list = code[offset + 2];
+            let index = code[offset + 3];
+            writeln!(f, "list.get s{} s{} s{}", dst, list, index)
+        }
+        Opcode::ListSlice => {
+            let dst = code[offset + 1];
+            let list = code[offset + 2];
+            let start = code[offset + 3];
+            let end = code[offset + 4];
+            writeln!(f, "list.slice s{} s{} s{} s{}", dst, list, start, end)
+        }
         Opcode::Halt => {
             writeln!(f, "halt")
         }
@@ -295,6 +319,10 @@ fn inst_size(op: Opcode) -> usize {
         Opcode::LoadCapture => 3,  // op + dst + idx
         Opcode::StoreCapture => 3, // op + idx + src
         Opcode::Echo => 2,         // op + src
+        Opcode::ListNew => 3,      // op + dst + capacity
+        Opcode::ListSet => 4,      // op + list + index + value
+        Opcode::ListGet => 4,      // op + dst + list + index
+        Opcode::ListSlice => 5,    // op + dst + list + start + end
         Opcode::Halt => 1,         // op
     }
 }

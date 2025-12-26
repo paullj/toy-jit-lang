@@ -218,6 +218,8 @@ impl<'a> LowerCtx<'a> {
         self.next_block = 1;
         self.local_scopes = vec![HashMap::new()];
 
+        let mut last_expr_value: Option<Operand> = None;
+
         for item in &self.hir.items {
             match item {
                 Item::Definition(Definition::Function { name, .. }) => {
@@ -236,6 +238,7 @@ impl<'a> LowerCtx<'a> {
                         local,
                         src: Operand::VReg(dst),
                     });
+                    last_expr_value = None;
                 }
                 Item::Definition(Definition::Variable { name, value }) => {
                     let name_str = self.resolve(*name).to_string();
@@ -245,6 +248,7 @@ impl<'a> LowerCtx<'a> {
                         local,
                         src: operand,
                     });
+                    last_expr_value = None;
                 }
                 Item::Assignment { name, value } => {
                     let name_str = self.resolve(*name).to_string();
@@ -255,14 +259,32 @@ impl<'a> LowerCtx<'a> {
                             src: operand,
                         });
                     }
+                    last_expr_value = None;
+                }
+                Item::IndexAssignment {
+                    collection,
+                    index,
+                    value,
+                } => {
+                    let list = self.lower_expr_idx(*collection);
+                    let idx = self.lower_expr_idx(*index);
+                    let val = self.lower_expr(value);
+                    self.emit(Inst::ListSet {
+                        list,
+                        index: idx,
+                        value: val,
+                    });
+                    last_expr_value = None;
                 }
                 Item::Expression(expr) => {
-                    self.lower_expr(expr);
+                    last_expr_value = Some(self.lower_expr(expr));
                 }
             }
         }
 
-        self.emit(Inst::Return { value: None });
+        self.emit(Inst::Return {
+            value: last_expr_value,
+        });
 
         // Build main function
         self.blocks.push(std::mem::replace(
@@ -548,6 +570,13 @@ impl<'a> LowerCtx<'a> {
                 }
                 Operand::IntConst(0)
             }
+            Expression::List { elements } => self.lower_list(elements),
+            Expression::Index { collection, index } => self.lower_index(*collection, *index),
+            Expression::Slice {
+                collection,
+                start,
+                end,
+            } => self.lower_slice(*collection, *start, *end),
         }
     }
 
@@ -734,6 +763,20 @@ impl<'a> LowerCtx<'a> {
                         });
                     }
                 }
+                BlockItem::IndexAssignment {
+                    collection,
+                    index,
+                    value,
+                } => {
+                    let list = self.lower_expr_idx(*collection);
+                    let idx = self.lower_expr_idx(*index);
+                    let val = self.lower_expr_idx(*value);
+                    self.emit(Inst::ListSet {
+                        list,
+                        index: idx,
+                        value: val,
+                    });
+                }
                 BlockItem::Expression(idx) => {
                     self.lower_expr_idx(*idx);
                 }
@@ -876,6 +919,63 @@ impl<'a> LowerCtx<'a> {
         // Exit block
         self.switch_to_block(exit_bb);
         Operand::IntConst(0)
+    }
+
+    fn lower_list(&mut self, elements: &[ExprIdx]) -> Operand {
+        let dst = self.fresh_vreg();
+
+        // Create new list with capacity
+        self.emit(Inst::ListNew {
+            dst,
+            capacity: elements.len() as u32,
+        });
+
+        // Set each element
+        for (i, elem_idx) in elements.iter().enumerate() {
+            let value = self.lower_expr_idx(*elem_idx);
+            self.emit(Inst::ListSet {
+                list: Operand::VReg(dst),
+                index: Operand::IntConst(i as i64),
+                value,
+            });
+        }
+
+        Operand::VReg(dst)
+    }
+
+    fn lower_index(&mut self, collection: ExprIdx, index: ExprIdx) -> Operand {
+        let list = self.lower_expr_idx(collection);
+        let idx = self.lower_expr_idx(index);
+        let dst = self.fresh_vreg();
+
+        self.emit(Inst::ListGet {
+            dst,
+            list,
+            index: idx,
+        });
+
+        Operand::VReg(dst)
+    }
+
+    fn lower_slice(
+        &mut self,
+        collection: ExprIdx,
+        start: Option<ExprIdx>,
+        end: Option<ExprIdx>,
+    ) -> Operand {
+        let list = self.lower_expr_idx(collection);
+        let start_op = start.map(|s| self.lower_expr_idx(s));
+        let end_op = end.map(|e| self.lower_expr_idx(e));
+        let dst = self.fresh_vreg();
+
+        self.emit(Inst::ListSlice {
+            dst,
+            list,
+            start: start_op,
+            end: end_op,
+        });
+
+        Operand::VReg(dst)
     }
 
     fn finish(self) -> Module {

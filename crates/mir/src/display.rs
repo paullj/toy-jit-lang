@@ -90,6 +90,34 @@ impl fmt::Display for Inst {
             Inst::Echo { src } => {
                 write!(f, "echo {}", src)
             }
+
+            // List operations
+            Inst::ListNew { dst, capacity } => {
+                write!(f, "{} = list_new {}", dst, capacity)
+            }
+            Inst::ListSet { list, index, value } => {
+                write!(f, "list_set {} {} {}", list, index, value)
+            }
+            Inst::ListGet { dst, list, index } => {
+                write!(f, "{} = list_get {} {}", dst, list, index)
+            }
+            Inst::ListSlice {
+                dst,
+                list,
+                start,
+                end,
+            } => {
+                write!(f, "{} = list_slice {} ", dst, list)?;
+                match start {
+                    Some(s) => write!(f, "{}", s)?,
+                    None => write!(f, "_")?,
+                }
+                write!(f, "..")?;
+                match end {
+                    Some(e) => write!(f, "{}", e),
+                    None => write!(f, "_"),
+                }
+            }
         }
     }
 }

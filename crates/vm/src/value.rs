@@ -23,6 +23,7 @@ const TAG_UNIT: u64 = 0x0003_0000_0000_0000; // 011
 const TAG_INTERNED: u64 = 0x0004_0000_0000_0000; // 100
 const TAG_DYNSTR: u64 = 0x0005_0000_0000_0000; // 101
 const TAG_CLOSURE: u64 = 0x0006_0000_0000_0000; // 110
+const TAG_LIST: u64 = 0x0007_0000_0000_0000; // 111
 
 // Combined patterns for fast checking
 const QNAN_INT: u64 = QNAN | TAG_INT;
@@ -31,6 +32,7 @@ const QNAN_UNIT: u64 = QNAN | TAG_UNIT;
 const QNAN_INTERNED: u64 = QNAN | TAG_INTERNED;
 const QNAN_DYNSTR: u64 = QNAN | TAG_DYNSTR;
 const QNAN_CLOSURE: u64 = QNAN | TAG_CLOSURE;
+const QNAN_LIST: u64 = QNAN | TAG_LIST;
 
 // Mask for type checking: QNAN + TAG
 const TYPE_MASK: u64 = QNAN | TAG_MASK;
@@ -45,6 +47,7 @@ const TYPE_MASK: u64 = QNAN | TAG_MASK;
 /// - InternedString: QNAN | TAG_INTERNED | spur index
 /// - DynamicString: QNAN | TAG_DYNSTR | heap index
 /// - Closure: QNAN | TAG_CLOSURE | heap index
+/// - List: QNAN | TAG_LIST | heap index
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Value(u64);
@@ -88,6 +91,23 @@ impl Value {
         Self(QNAN_CLOSURE | (idx as u64))
     }
 
+    #[inline(always)]
+    pub const fn list(idx: u32) -> Self {
+        Self(QNAN_LIST | (idx as u64))
+    }
+
+    /// Get raw bits for passing to/from JIT (NaN-boxed representation).
+    #[inline(always)]
+    pub const fn to_bits(self) -> i64 {
+        self.0 as i64
+    }
+
+    /// Reconstruct Value from JIT bits (NaN-boxed representation).
+    #[inline(always)]
+    pub const fn from_bits(raw: i64) -> Self {
+        Self(raw as u64)
+    }
+
     /// Check if this is a float (not NaN-boxed)
     #[inline(always)]
     pub fn is_float(&self) -> bool {
@@ -128,6 +148,12 @@ impl Value {
     #[inline(always)]
     pub fn is_closure(&self) -> bool {
         (self.0 & TYPE_MASK) == QNAN_CLOSURE
+    }
+
+    /// Check if this is a list
+    #[inline(always)]
+    pub fn is_list(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_LIST
     }
 
     /// Check if this is any string type
@@ -227,6 +253,22 @@ impl Value {
         (self.0 & PAYLOAD_MASK) as u32
     }
 
+    #[inline(always)]
+    pub fn as_list_idx(&self) -> Option<u32> {
+        if self.is_list() {
+            Some((self.0 & PAYLOAD_MASK) as u32)
+        } else {
+            None
+        }
+    }
+
+    /// Get list index. Panics in debug if wrong type.
+    #[inline(always)]
+    pub fn as_list_idx_unchecked(&self) -> u32 {
+        debug_assert!(self.is_list(), "expected List");
+        (self.0 & PAYLOAD_MASK) as u32
+    }
+
     pub fn type_name(&self) -> &'static str {
         if self.is_float() {
             "Float"
@@ -237,6 +279,7 @@ impl Value {
                 QNAN_UNIT => "Unit",
                 QNAN_INTERNED | QNAN_DYNSTR => "String",
                 QNAN_CLOSURE => "Closure",
+                QNAN_LIST => "List",
                 _ => "Unknown",
             }
         }
@@ -265,6 +308,12 @@ impl Value {
                 let closure = heap.get_closure(idx);
                 format!("<closure fn{}>", closure.func_idx)
             }
+            QNAN_LIST => {
+                let idx = (self.0 & PAYLOAD_MASK) as u32;
+                let list = heap.get_list(idx);
+                let elements: Vec<String> = list.elements.iter().map(|v| v.display(heap)).collect();
+                format!("[{}]", elements.join(", "))
+            }
             _ => "<unknown>".to_string(),
         }
     }
@@ -292,6 +341,16 @@ impl Value {
                 let idx = (self.0 & PAYLOAD_MASK) as u32;
                 let closure = heap.get_closure(idx);
                 format!("<closure fn{}>", closure.func_idx)
+            }
+            QNAN_LIST => {
+                let idx = (self.0 & PAYLOAD_MASK) as u32;
+                let list = heap.get_list(idx);
+                let elements: Vec<String> = list
+                    .elements
+                    .iter()
+                    .map(|v| v.display_with_interner(heap, interner))
+                    .collect();
+                format!("[{}]", elements.join(", "))
             }
             _ => "<unknown>".to_string(),
         }
@@ -349,6 +408,23 @@ impl Value {
             return true;
         }
 
+        // List comparison
+        if self_type == QNAN_LIST && other_type == QNAN_LIST {
+            let a_idx = (self.0 & PAYLOAD_MASK) as u32;
+            let b_idx = (other.0 & PAYLOAD_MASK) as u32;
+            let a = heap.get_list(a_idx);
+            let b = heap.get_list(b_idx);
+            if a.elements.len() != b.elements.len() {
+                return false;
+            }
+            for (ea, eb) in a.elements.iter().zip(b.elements.iter()) {
+                if !ea.eq(eb, heap, interner) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         false
     }
 
@@ -382,6 +458,7 @@ impl std::fmt::Debug for Value {
             QNAN_INTERNED => write!(f, "InternedString(spur={})", self.0 & PAYLOAD_MASK),
             QNAN_DYNSTR => write!(f, "DynamicString(idx={})", self.0 & PAYLOAD_MASK),
             QNAN_CLOSURE => write!(f, "Closure(idx={})", self.0 & PAYLOAD_MASK),
+            QNAN_LIST => write!(f, "List(idx={})", self.0 & PAYLOAD_MASK),
             _ => write!(f, "Unknown(0x{:016x})", self.0),
         }
     }
@@ -393,6 +470,11 @@ pub struct ClosureData {
     pub captures: Box<[Cell<Value>]>,
 }
 
+/// List data stored in heap pool.
+pub struct ListData {
+    pub elements: Vec<Value>,
+}
+
 /// GC statistics for debugging/profiling.
 #[derive(Debug, Clone, Default)]
 pub struct GcStats {
@@ -400,21 +482,25 @@ pub struct GcStats {
     pub bytes_freed: u64,
     pub strings_freed: u64,
     pub closures_freed: u64,
+    pub lists_freed: u64,
 }
 
-/// Heap for dynamic strings and closures with mark-and-sweep GC.
+/// Heap for dynamic strings, closures, and lists with mark-and-sweep GC.
 pub struct Heap {
     // Object storage (None = freed slot)
     strings: Vec<Option<String>>,
     closures: Vec<Option<ClosureData>>,
+    lists: Vec<Option<ListData>>,
 
     // Free lists for slot reuse
     free_strings: Vec<u32>,
     free_closures: Vec<u32>,
+    free_lists: Vec<u32>,
 
     // Mark bits (separate for cache efficiency)
     string_marks: Vec<bool>,
     closure_marks: Vec<bool>,
+    list_marks: Vec<bool>,
 
     // GC state
     bytes_allocated: usize,
@@ -432,10 +518,13 @@ impl Heap {
         Self {
             strings: Vec::new(),
             closures: Vec::new(),
+            lists: Vec::new(),
             free_strings: Vec::new(),
             free_closures: Vec::new(),
+            free_lists: Vec::new(),
             string_marks: Vec::new(),
             closure_marks: Vec::new(),
+            list_marks: Vec::new(),
             bytes_allocated: 0,
             gc_threshold: INITIAL_GC_THRESHOLD,
             stats: GcStats::default(),
@@ -496,6 +585,43 @@ impl Heap {
             .expect("accessing freed closure")
     }
 
+    /// Allocate a list on the heap, returns index.
+    /// Pre-fills with unit values for literal initialization via ListSet.
+    pub fn alloc_list(&mut self, capacity: usize) -> u32 {
+        // Estimate list size: Vec overhead (24) + elements (8 * capacity with NaN boxing)
+        let size = 24 + 8 * capacity;
+        let data = ListData {
+            elements: vec![Value::unit(); capacity],
+        };
+
+        let idx = if let Some(free_idx) = self.free_lists.pop() {
+            self.lists[free_idx as usize] = Some(data);
+            self.list_marks[free_idx as usize] = false;
+            free_idx
+        } else {
+            let idx = self.lists.len() as u32;
+            self.lists.push(Some(data));
+            self.list_marks.push(false);
+            idx
+        };
+        self.bytes_allocated += size;
+        idx
+    }
+
+    /// Get list by index. Panics if freed.
+    pub fn get_list(&self, idx: u32) -> &ListData {
+        self.lists[idx as usize]
+            .as_ref()
+            .expect("accessing freed list")
+    }
+
+    /// Get mutable list by index. Panics if freed.
+    pub fn get_list_mut(&mut self, idx: u32) -> &mut ListData {
+        self.lists[idx as usize]
+            .as_mut()
+            .expect("accessing freed list")
+    }
+
     /// Check if GC should run based on allocation threshold.
     pub fn should_gc(&self) -> bool {
         self.bytes_allocated > self.gc_threshold
@@ -511,7 +637,7 @@ impl Heap {
         self.bytes_allocated
     }
 
-    /// Mark a value as reachable. Returns handles to trace if it's a closure.
+    /// Mark a value as reachable. Returns handles to trace if it's a closure or list.
     fn mark_value(&mut self, value: Value) -> Option<Vec<Value>> {
         if value.is_dynamic_string() {
             let idx = value.as_dynamic_string_idx().unwrap() as usize;
@@ -526,6 +652,16 @@ impl Heap {
                 // Return captures to trace
                 if let Some(closure) = &self.closures[idx] {
                     return Some(closure.captures.iter().map(|c| c.get()).collect());
+                }
+            }
+            None
+        } else if value.is_list() {
+            let idx = value.as_list_idx().unwrap() as usize;
+            if idx < self.list_marks.len() && !self.list_marks[idx] {
+                self.list_marks[idx] = true;
+                // Return elements to trace
+                if let Some(list) = &self.lists[idx] {
+                    return Some(list.elements.clone());
                 }
             }
             None
@@ -550,6 +686,7 @@ impl Heap {
         let mut bytes_freed = 0u64;
         let mut strings_freed = 0u64;
         let mut closures_freed = 0u64;
+        let mut lists_freed = 0u64;
 
         // Sweep strings
         for (i, marked) in self.string_marks.iter_mut().enumerate() {
@@ -572,10 +709,22 @@ impl Heap {
             *marked = false;
         }
 
+        // Sweep lists
+        for (i, marked) in self.list_marks.iter_mut().enumerate() {
+            if !*marked && let Some(list) = self.lists[i].take() {
+                let size = 24 + 8 * list.elements.len();
+                bytes_freed += size as u64;
+                lists_freed += 1;
+                self.free_lists.push(i as u32);
+            }
+            *marked = false;
+        }
+
         self.bytes_allocated = self.bytes_allocated.saturating_sub(bytes_freed as usize);
         self.stats.bytes_freed += bytes_freed;
         self.stats.strings_freed += strings_freed;
         self.stats.closures_freed += closures_freed;
+        self.stats.lists_freed += lists_freed;
     }
 
     /// Run a full GC cycle with the given roots.
@@ -825,5 +974,40 @@ mod tests {
         // Bytes should be reduced
         assert_eq!(heap.bytes_allocated(), 0);
         assert!(heap.stats().bytes_freed >= 10);
+    }
+
+    #[test]
+    fn test_list_basic() {
+        let mut heap = Heap::new();
+
+        let idx = heap.alloc_list(3);
+        let list = heap.get_list_mut(idx);
+        list.elements[0] = Value::int(1);
+        list.elements[1] = Value::int(2);
+        list.elements[2] = Value::int(3);
+
+        let val = Value::list(idx);
+        assert!(val.is_list());
+        assert_eq!(val.as_list_idx(), Some(idx));
+        assert_eq!(val.display(&heap), "[1, 2, 3]");
+    }
+
+    #[test]
+    fn test_gc_traces_list_elements() {
+        let mut heap = Heap::new();
+
+        // Create a string that's only reachable through a list element
+        let str_idx = heap.alloc_string("in list".to_string());
+        let list_idx = heap.alloc_list(1);
+        heap.get_list_mut(list_idx).elements[0] = Value::dynamic_string(str_idx);
+
+        // Only list is a direct root, but string should survive via element
+        let roots = vec![Value::list(list_idx)];
+        heap.collect(roots.into_iter());
+
+        // Both should survive
+        assert_eq!(heap.get_string(str_idx), "in list");
+        assert_eq!(heap.stats().strings_freed, 0);
+        assert_eq!(heap.stats().lists_freed, 0);
     }
 }

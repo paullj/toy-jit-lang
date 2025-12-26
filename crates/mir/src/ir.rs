@@ -254,6 +254,32 @@ pub enum Inst {
     Echo {
         src: Operand,
     },
+
+    // List operations
+    /// Create a new list with given capacity
+    ListNew {
+        dst: VReg,
+        capacity: u32,
+    },
+    /// Set element in list: list[index] = value
+    ListSet {
+        list: Operand,
+        index: Operand,
+        value: Operand,
+    },
+    /// Get element from list: dst = list[index]
+    ListGet {
+        dst: VReg,
+        list: Operand,
+        index: Operand,
+    },
+    /// Slice a list: dst = list[start..end]
+    ListSlice {
+        dst: VReg,
+        list: Operand,
+        start: Option<Operand>,
+        end: Option<Operand>,
+    },
 }
 
 impl Inst {

@@ -260,6 +260,24 @@ impl<'a> InferCtx<'a> {
                     }
                 }
             }
+            Item::IndexAssignment {
+                collection,
+                index,
+                value,
+            } => {
+                let (collection_ty, coll_span) = self.infer_expr_idx(*collection);
+                let (index_ty, idx_span) = self.infer_expr_idx(*index);
+                let value_ty = self.infer_expr(value, span);
+                // Type check: collection should be list, index should be int
+                let elem_ty = Type::Var(self.fresh_var());
+                self.unify_or_error(
+                    &collection_ty,
+                    &Type::List(Box::new(elem_ty.clone())),
+                    coll_span,
+                );
+                self.unify_or_error(&index_ty, &Type::Integer, idx_span);
+                self.unify_or_error(&value_ty, &elem_ty, span);
+            }
             Item::Expression(expr) => {
                 self.infer_expr(expr, span);
             }
@@ -320,6 +338,13 @@ impl<'a> InferCtx<'a> {
             }
             Expression::Break { .. } => Type::Unit,
             Expression::Continue { .. } => Type::Unit,
+            Expression::List { elements } => self.infer_list(elements),
+            Expression::Index { collection, index } => self.infer_index(*collection, *index, span),
+            Expression::Slice {
+                collection,
+                start,
+                end,
+            } => self.infer_slice(*collection, *start, *end, span),
         }
     }
 
@@ -457,6 +482,23 @@ impl<'a> InferCtx<'a> {
                 }
                 BlockItem::Break { .. } => {}
                 BlockItem::Continue { .. } => {}
+                BlockItem::IndexAssignment {
+                    collection,
+                    index,
+                    value,
+                } => {
+                    let (collection_ty, coll_span) = self.infer_expr_idx(*collection);
+                    let (index_ty, idx_span) = self.infer_expr_idx(*index);
+                    let (value_ty, val_span) = self.infer_expr_idx(*value);
+                    let elem_ty = Type::Var(self.fresh_var());
+                    self.unify_or_error(
+                        &collection_ty,
+                        &Type::List(Box::new(elem_ty.clone())),
+                        coll_span,
+                    );
+                    self.unify_or_error(&index_ty, &Type::Integer, idx_span);
+                    self.unify_or_error(&value_ty, &elem_ty, val_span);
+                }
             }
         }
 
@@ -487,6 +529,75 @@ impl<'a> InferCtx<'a> {
             }
             None => Type::Unit,
         }
+    }
+
+    fn infer_list(&mut self, elements: &[ExprIdx]) -> Type {
+        if elements.is_empty() {
+            // Empty list: list['a] with fresh type var
+            Type::List(Box::new(Type::Var(self.fresh_var())))
+        } else {
+            // Infer first element type, unify all others with it
+            let (first_ty, _) = self.infer_expr_idx(elements[0]);
+            for &elem_idx in &elements[1..] {
+                let (elem_ty, elem_span) = self.infer_expr_idx(elem_idx);
+                self.unify_or_error(&first_ty, &elem_ty, elem_span);
+            }
+            Type::List(Box::new(self.subst.apply(&first_ty)))
+        }
+    }
+
+    fn infer_index(&mut self, collection: ExprIdx, index: ExprIdx, _span: TextRange) -> Type {
+        let (coll_ty, coll_span) = self.infer_expr_idx(collection);
+        let (idx_ty, idx_span) = self.infer_expr_idx(index);
+
+        // Index must be int
+        self.unify_or_error(&idx_ty, &Type::Integer, idx_span);
+
+        // Collection must be list[T], return T
+        let elem_var = Type::Var(self.fresh_var());
+        let expected_list = Type::List(Box::new(elem_var.clone()));
+        self.unify_or_error(&coll_ty, &expected_list, coll_span);
+
+        // Also support string indexing -> string
+        let resolved = self.subst.apply(&coll_ty);
+        if resolved == Type::String {
+            return Type::String;
+        }
+
+        self.subst.apply(&elem_var)
+    }
+
+    fn infer_slice(
+        &mut self,
+        collection: ExprIdx,
+        start: Option<ExprIdx>,
+        end: Option<ExprIdx>,
+        _span: TextRange,
+    ) -> Type {
+        let (coll_ty, coll_span) = self.infer_expr_idx(collection);
+
+        // Start and end must be int if present
+        if let Some(start_idx) = start {
+            let (start_ty, start_span) = self.infer_expr_idx(start_idx);
+            self.unify_or_error(&start_ty, &Type::Integer, start_span);
+        }
+        if let Some(end_idx) = end {
+            let (end_ty, end_span) = self.infer_expr_idx(end_idx);
+            self.unify_or_error(&end_ty, &Type::Integer, end_span);
+        }
+
+        // Collection must be list[T], slice returns list[T]
+        let elem_var = Type::Var(self.fresh_var());
+        let expected_list = Type::List(Box::new(elem_var.clone()));
+        self.unify_or_error(&coll_ty, &expected_list, coll_span);
+
+        // Also support string slicing -> string
+        let resolved = self.subst.apply(&coll_ty);
+        if resolved == Type::String {
+            return Type::String;
+        }
+
+        self.subst.apply(&expected_list)
     }
 
     fn lookup(&mut self, name: &str, span: TextRange) -> Type {

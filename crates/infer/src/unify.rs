@@ -14,6 +14,7 @@ fn occurs_check(var: TypeVar, ty: &Type) -> bool {
         Type::Function { params, ret } => {
             params.iter().any(|p| occurs_check(var, p)) || occurs_check(var, ret)
         }
+        Type::List(elem) => occurs_check(var, elem),
         _ => false,
     }
 }
@@ -72,6 +73,9 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, UnifyError> {
             let s_ret = unify(&s.apply(r1), &s.apply(r2))?;
             Ok(s_ret.compose(&s))
         }
+
+        // List types
+        (Type::List(e1), Type::List(e2)) => unify(e1, e2),
 
         // Mismatch
         _ => Err(UnifyError::Mismatch {

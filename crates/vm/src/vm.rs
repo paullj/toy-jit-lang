@@ -96,6 +96,22 @@ impl<'a> Vm<'a> {
         self.get(base, slot).as_closure_idx_unchecked()
     }
 
+    /// Get list index from slot (unchecked in release)
+    #[inline(always)]
+    fn get_list_idx(&self, base: usize, slot: u8) -> u32 {
+        self.get(base, slot).as_list_idx_unchecked()
+    }
+
+    /// Normalize list index (handle negative indexing)
+    #[inline(always)]
+    fn normalize_index(index: i64, len: usize) -> Result<usize, RuntimeError> {
+        let normalized = if index < 0 { len as i64 + index } else { index };
+        if normalized < 0 || normalized as usize >= len {
+            return Err(RuntimeError::IndexOutOfBounds { index, len });
+        }
+        Ok(normalized as usize)
+    }
+
     /// Get current frame's closure index
     fn current_closure_idx(&self) -> Result<u32, RuntimeError> {
         if self.frame_count > 0 {
@@ -568,6 +584,86 @@ impl<'a> Vm<'a> {
                     let src = reader.read_u8();
                     let val = self.get(base, src);
                     println!("{}", val.display_with_interner(&self.heap, self.strings));
+                }
+
+                // List operations
+                Opcode::ListNew => {
+                    let dst = reader.read_u8();
+                    let capacity = reader.read_u8();
+                    self.maybe_gc();
+                    let list_idx = self.heap.alloc_list(capacity as usize);
+                    let result = Value::list(list_idx);
+                    self.set(base, dst, result);
+                }
+
+                Opcode::ListSet => {
+                    let list = reader.read_u8();
+                    let index = reader.read_u8();
+                    let value = reader.read_u8();
+                    let list_idx = self.get_list_idx(base, list);
+                    let idx = self.get_int(base, index);
+                    let val = self.get(base, value);
+
+                    let list_data = self.heap.get_list_mut(list_idx);
+                    let len = list_data.elements.len();
+                    let normalized = Self::normalize_index(idx, len)?;
+                    list_data.elements[normalized] = val;
+                }
+
+                Opcode::ListGet => {
+                    let dst = reader.read_u8();
+                    let list = reader.read_u8();
+                    let index = reader.read_u8();
+                    let list_idx = self.get_list_idx(base, list);
+                    let idx = self.get_int(base, index);
+
+                    let list_data = self.heap.get_list(list_idx);
+                    let len = list_data.elements.len();
+                    let normalized = Self::normalize_index(idx, len)?;
+                    let result = list_data.elements[normalized];
+                    self.set(base, dst, result);
+                }
+
+                Opcode::ListSlice => {
+                    let dst = reader.read_u8();
+                    let list = reader.read_u8();
+                    let start = reader.read_u8();
+                    let end = reader.read_u8();
+                    self.maybe_gc();
+                    let list_idx = self.get_list_idx(base, list);
+                    let start_val = self.get_int(base, start);
+                    let end_val = self.get_int(base, end);
+
+                    let list_data = self.heap.get_list(list_idx);
+                    let len = list_data.elements.len();
+
+                    // SLICE_MISSING is sentinel for "missing" bounds
+                    let start_idx = if start_val == compile::SLICE_MISSING {
+                        0
+                    } else if start_val < 0 {
+                        (len as i64 + start_val).max(0) as usize
+                    } else {
+                        (start_val as usize).min(len)
+                    };
+
+                    let end_idx = if end_val == compile::SLICE_MISSING {
+                        len
+                    } else if end_val < 0 {
+                        (len as i64 + end_val).max(0) as usize
+                    } else {
+                        (end_val as usize).min(len)
+                    };
+
+                    let slice: Vec<Value> = if start_idx < end_idx {
+                        list_data.elements[start_idx..end_idx].to_vec()
+                    } else {
+                        Vec::new()
+                    };
+
+                    let new_list_idx = self.heap.alloc_list(slice.len());
+                    self.heap.get_list_mut(new_list_idx).elements = slice;
+                    let result = Value::list(new_list_idx);
+                    self.set(base, dst, result);
                 }
 
                 // End

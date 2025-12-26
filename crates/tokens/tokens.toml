@@ -56,6 +56,18 @@ category = "punctuation"
 textmate_scope = "punctuation.brace.close.toy"
 
 [[tokens]]
+name = "LeftBracket"
+literal = "["
+category = "punctuation"
+textmate_scope = "punctuation.bracket.open.toy"
+
+[[tokens]]
+name = "RightBracket"
+literal = "]"
+category = "punctuation"
+textmate_scope = "punctuation.bracket.close.toy"
+
+[[tokens]]
 name = "Comma"
 literal = ","
 category = "punctuation"
@@ -66,6 +78,13 @@ name = "Colon"
 literal = ":"
 category = "punctuation"
 textmate_scope = "punctuation.colon.toy"
+
+[[tokens]]
+name = "DotDot"
+literal = ".."
+category = "operator"
+priority = 2
+textmate_scope = "keyword.operator.range.toy"
 
 # Arithmetic operators (int)
 [[tokens]]

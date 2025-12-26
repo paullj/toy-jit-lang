@@ -65,8 +65,14 @@ pub enum Opcode {
     // I/O (1)
     Echo = 38, // src:u8
 
+    // List operations (4)
+    ListNew = 39,   // dst:u8, capacity:u8
+    ListSet = 40,   // list:u8, index:u8, value:u8
+    ListGet = 41,   // dst:u8, list:u8, index:u8
+    ListSlice = 42, // dst:u8, list:u8, start:u8, end:u8
+
     // End (1)
-    Halt = 39,
+    Halt = 43,
 }
 
 impl Opcode {
@@ -93,3 +99,8 @@ impl Opcode {
 
 /// Sentinel value for "no slot" in optional slot fields
 pub const NO_SLOT: u8 = 0xFF;
+
+/// Sentinel value for "missing" slice bounds.
+/// Must fit in 48-bit NaN-boxed payload (so NOT i64::MIN).
+/// Uses largest magnitude negative 48-bit value: -(2^47) = -140737488355328
+pub const SLICE_MISSING: i64 = -(1i64 << 47);

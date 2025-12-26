@@ -40,6 +40,7 @@ pub enum Type {
     Unit,
     Var(TypeVar),
     Function { params: Vec<Type>, ret: Box<Type> },
+    List(Box<Type>),
     Error,
 }
 
@@ -68,6 +69,9 @@ impl Type {
                     p.collect_free_vars(vars);
                 }
                 ret.collect_free_vars(vars);
+            }
+            Type::List(elem) => {
+                elem.collect_free_vars(vars);
             }
             _ => {}
         }
@@ -104,6 +108,7 @@ impl fmt::Display for Type {
                     write!(f, ") -> {}", ret)
                 }
             }
+            Type::List(elem) => write!(f, "list[{}]", elem),
             Type::Error => write!(f, "<error>"),
         }
     }

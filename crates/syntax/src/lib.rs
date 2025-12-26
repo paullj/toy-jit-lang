@@ -20,10 +20,13 @@ pub enum SyntaxKind {
     RightParenthesis,
     LeftBrace,
     RightBrace,
+    LeftBracket,
+    RightBracket,
 
     // Tokens - Punctuation
     Comma,
     Colon,
+    DotDot,
 
     // Tokens - Arithmetic operators
     Plus,
@@ -103,6 +106,13 @@ pub enum SyntaxKind {
     WhileExpression,
     BreakStatement,
     ContinueStatement,
+
+    // List nodes
+    ListExpression,
+    IndexExpression,
+    SliceExpression,
+    IndexAssignment,
+    ListType,
 }
 
 impl SyntaxKind {
@@ -131,10 +141,13 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::RightParenthesis => SyntaxKind::RightParenthesis,
             TokenKind::LeftBrace => SyntaxKind::LeftBrace,
             TokenKind::RightBrace => SyntaxKind::RightBrace,
+            TokenKind::LeftBracket => SyntaxKind::LeftBracket,
+            TokenKind::RightBracket => SyntaxKind::RightBracket,
 
             // Punctuation
             TokenKind::Comma => SyntaxKind::Comma,
             TokenKind::Colon => SyntaxKind::Colon,
+            TokenKind::DotDot => SyntaxKind::DotDot,
 
             // Arithmetic operators
             TokenKind::Plus => SyntaxKind::Plus,

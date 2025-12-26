@@ -44,7 +44,15 @@ impl fmt::Debug for Ident {
 #[derive(Debug, Clone)]
 pub enum Item {
     Definition(Definition),
-    Assignment { name: Ident, value: Expression },
+    Assignment {
+        name: Ident,
+        value: Expression,
+    },
+    IndexAssignment {
+        collection: ExprIdx,
+        index: ExprIdx,
+        value: Expression,
+    },
     Expression(Expression),
 }
 
@@ -125,18 +133,49 @@ pub enum Expression {
     Continue {
         label: Option<Ident>,
     },
+    List {
+        elements: Vec<ExprIdx>,
+    },
+    Index {
+        collection: ExprIdx,
+        index: ExprIdx,
+    },
+    Slice {
+        collection: ExprIdx,
+        start: Option<ExprIdx>,
+        end: Option<ExprIdx>,
+    },
 }
 
 /// Item inside a block expression
 #[derive(Debug, Clone)]
 pub enum BlockItem {
-    Definition { name: Ident, value: ExprIdx },
-    Assignment { name: Ident, value: ExprIdx },
+    Definition {
+        name: Ident,
+        value: ExprIdx,
+    },
+    Assignment {
+        name: Ident,
+        value: ExprIdx,
+    },
+    IndexAssignment {
+        collection: ExprIdx,
+        index: ExprIdx,
+        value: ExprIdx,
+    },
     Expression(ExprIdx),
-    Return { value: Option<ExprIdx> },
-    Echo { value: ExprIdx },
-    Break { label: Option<Ident> },
-    Continue { label: Option<Ident> },
+    Return {
+        value: Option<ExprIdx>,
+    },
+    Echo {
+        value: ExprIdx,
+    },
+    Break {
+        label: Option<Ident>,
+    },
+    Continue {
+        label: Option<Ident>,
+    },
 }
 
 #[derive(Debug, Clone)]

@@ -61,6 +61,7 @@ pub(crate) const EXPR_FIRST: TokenSet = LITERAL_SET
     .union(PREFIX_SET)
     .union(TokenSet::single(TokenKind::LeftParenthesis))
     .union(TokenSet::single(TokenKind::LeftBrace))
+    .union(TokenSet::single(TokenKind::LeftBracket))
     .union(TokenSet::single(TokenKind::If))
     .union(TokenSet::single(TokenKind::Fn))
     .union(TokenSet::single(TokenKind::Loop))
@@ -72,14 +73,23 @@ const EXPR_RECOVERY: TokenSet = EXPR_FIRST.union(TokenSet::single(TokenKind::New
 fn expression_with_binding_power(p: &mut Parser, min_bp: u8) -> Option<CompletedMarker> {
     let mut lhs = lhs(p)?;
 
-    // Handle postfix operations (call expressions)
+    // Handle postfix operations (call expressions, index/slice)
     loop {
+        // Check for newline terminator, but allow `[` to continue if it's an index
+        // expression (not a list literal). This allows `x\n[0]` to parse as `x[0]`.
         if p.at_newline_terminator() {
-            break;
+            // Special case: `[` after newline might be index, not list
+            if p.at(TokenKind::LeftBracket) && p.is_bracket_index_not_list() {
+                // Continue - this is an index expression
+            } else {
+                break;
+            }
         }
 
         if p.at(TokenKind::LeftParenthesis) {
             lhs = call_expression(p, lhs);
+        } else if p.at(TokenKind::LeftBracket) {
+            lhs = index_or_slice_expression(p, lhs);
         } else {
             break;
         }
@@ -187,6 +197,7 @@ fn lhs(p: &mut Parser) -> Option<CompletedMarker> {
         Some(TokenKind::Minus) | Some(TokenKind::Bang) => prefix_expression(p),
         Some(TokenKind::LeftParenthesis) => Some(parenthesis_expression(p)),
         Some(TokenKind::LeftBrace) => Some(block_expression(p)),
+        Some(TokenKind::LeftBracket) => Some(list_expression(p)),
         Some(TokenKind::If) => Some(if_expression(p)),
         Some(TokenKind::Fn) => Some(crate::grammar::function_definition_or_expression(p)),
         Some(TokenKind::Loop) => Some(loop_expression(p)),
@@ -394,6 +405,105 @@ fn while_expression(p: &mut Parser) -> CompletedMarker {
     block_expression(p);
 
     m.complete(p, SyntaxKind::WhileExpression)
+}
+
+/// Parses list literal: `[expr, expr, ...]`
+fn list_expression(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::LeftBracket));
+
+    let m = p.start();
+    p.consume(); // eat '['
+    p.enter_delimiter();
+
+    let mut first = true;
+    while !p.at(TokenKind::RightBracket) && !p.is_at_end() {
+        if !first && !p.eat(TokenKind::Comma) {
+            break;
+        }
+        first = false;
+
+        // Handle trailing comma or empty list
+        if p.at(TokenKind::RightBracket) {
+            break;
+        }
+
+        expression(p);
+    }
+
+    p.exit_delimiter();
+    if !p.eat(TokenKind::RightBracket) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "']'".to_string(),
+            found,
+        });
+    }
+
+    m.complete(p, SyntaxKind::ListExpression)
+}
+
+/// Parses index or slice: `expr[idx]` or `expr[start..end]`
+pub(crate) fn index_or_slice_expression(
+    p: &mut Parser,
+    collection: CompletedMarker,
+) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::LeftBracket));
+
+    let m = collection.precede(p);
+    p.consume(); // eat '['
+    p.enter_delimiter();
+
+    // Check for slice patterns:
+    // [..end]  - from start
+    // [start..]  - to end
+    // [start..end] - range
+    // [idx] - single index
+
+    let is_slice = if p.at(TokenKind::DotDot) {
+        // [..end] or [..]
+        p.consume(); // eat '..'
+        if !p.at(TokenKind::RightBracket) {
+            expression(p); // end
+        }
+        true
+    } else if !p.at(TokenKind::RightBracket) {
+        // Has start expression
+        expression(p);
+        if p.at(TokenKind::DotDot) {
+            // [start..] or [start..end]
+            p.consume(); // eat '..'
+            if !p.at(TokenKind::RightBracket) {
+                expression(p); // end
+            }
+            true
+        } else {
+            // [idx]
+            false
+        }
+    } else {
+        // [] - empty, treat as error but complete
+        false
+    };
+
+    p.exit_delimiter();
+    if !p.eat(TokenKind::RightBracket) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "']'".to_string(),
+            found,
+        });
+    }
+
+    let kind = if is_slice {
+        SyntaxKind::SliceExpression
+    } else {
+        SyntaxKind::IndexExpression
+    };
+    m.complete(p, kind)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
