@@ -37,17 +37,103 @@ pub(crate) fn item(p: &mut Parser) -> Option<CompletedMarker> {
                     }
                 }
                 Some(TokenKind::Equals) => Some(variable_assignment(p, m)),
-                _ => {
-                    // Identifier possibly followed by call or operators -> treat as expression
-                    let mut lhs = m.complete(p, SyntaxKind::VariableReference);
+                Some(TokenKind::LeftBracket) => {
+                    // x[...] - could be index expression or index assignment
+                    let var_ref = m.complete(p, SyntaxKind::VariableReference);
+                    let index_m = var_ref.precede(p);
+                    p.consume(); // eat '['
+                    p.enter_delimiter();
 
-                    // Handle postfix operations (call expressions) - same logic as expression_with_binding_power
-                    loop {
-                        if p.at_newline_terminator() {
-                            break;
+                    // Check for slice vs index
+                    let is_slice = if p.at(TokenKind::DotDot) {
+                        p.consume();
+                        if !p.at(TokenKind::RightBracket) {
+                            expression(p);
                         }
+                        true
+                    } else if !p.at(TokenKind::RightBracket) {
+                        expression(p);
+                        if p.at(TokenKind::DotDot) {
+                            p.consume();
+                            if !p.at(TokenKind::RightBracket) {
+                                expression(p);
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    p.exit_delimiter();
+                    if !p.eat(TokenKind::RightBracket) {
+                        let span = p.current_span();
+                        let found = p.current().map(|k| k.to_string());
+                        p.error(crate::ParseError::UnexpectedToken {
+                            at: span.into(),
+                            expected: "']'".to_string(),
+                            found,
+                        });
+                    }
+
+                    let kind = if is_slice {
+                        SyntaxKind::SliceExpression
+                    } else {
+                        SyntaxKind::IndexExpression
+                    };
+                    let mut lhs = index_m.complete(p, kind);
+
+                    // Handle chained postfix operations (more indexes, calls)
+                    loop {
+                        // Check for newline terminator, but allow `[` to continue if index
+                        if p.at_newline_terminator() {
+                            if p.at(TokenKind::LeftBracket) && p.is_bracket_index_not_list() {
+                                // Continue - this is an index expression
+                            } else {
+                                break;
+                            }
+                        }
+
                         if p.at(TokenKind::LeftParenthesis) {
                             lhs = call_expression(p, lhs);
+                        } else if p.at(TokenKind::LeftBracket) {
+                            lhs = index_or_slice_expression(p, lhs);
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // Now check if this is an assignment
+                    if p.at(TokenKind::Equals) {
+                        let assign_m = lhs.precede(p);
+                        p.consume(); // eat '='
+                        expression(p);
+                        Some(assign_m.complete(p, SyntaxKind::IndexAssignment))
+                    } else {
+                        // Just an expression, continue with infix operators
+                        inner_expression_with_binding_power(p, lhs, 0)
+                    }
+                }
+                _ => {
+                    // Identifier possibly followed by call/index or operators -> treat as expression
+                    let mut lhs = m.complete(p, SyntaxKind::VariableReference);
+
+                    // Handle postfix operations (call expressions, indexes)
+                    loop {
+                        // Check for newline terminator, but allow `[` to continue if index
+                        if p.at_newline_terminator() {
+                            if p.at(TokenKind::LeftBracket) && p.is_bracket_index_not_list() {
+                                // Continue - this is an index expression
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if p.at(TokenKind::LeftParenthesis) {
+                            lhs = call_expression(p, lhs);
+                        } else if p.at(TokenKind::LeftBracket) {
+                            lhs = index_or_slice_expression(p, lhs);
                         } else {
                             break;
                         }

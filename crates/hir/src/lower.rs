@@ -255,6 +255,34 @@ fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
             let value = lower_expression(ctx, asgn.value());
             Some(Item::Assignment { name, value })
         }
+        ast::Item::IndexAssignment(idx_asgn) => {
+            let target = idx_asgn.target()?;
+            let value_expr = lower_expression(ctx, idx_asgn.value());
+
+            match target {
+                ast::Expression::Index(idx_expr) => {
+                    let collection = idx_expr.collection().map(|e| {
+                        let span = e.syntax().text_range();
+                        let expr = lower_expression(ctx, Some(e));
+                        ctx.alloc(expr, span)
+                    })?;
+                    let index = idx_expr.index().map(|e| {
+                        let span = e.syntax().text_range();
+                        let expr = lower_expression(ctx, Some(e));
+                        ctx.alloc(expr, span)
+                    })?;
+                    Some(Item::IndexAssignment {
+                        collection,
+                        index,
+                        value: value_expr,
+                    })
+                }
+                _ => {
+                    // Slice assignment not yet supported
+                    Some(Item::Expression(Expression::Missing))
+                }
+            }
+        }
         ast::Item::ReturnStatement(ret) => {
             let value = ret.value().map(|e| {
                 let span = e.syntax().text_range();
@@ -793,6 +821,36 @@ fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
                 name,
                 value: value_idx,
             })
+        }
+        ast::Item::IndexAssignment(idx_asgn) => {
+            let target = idx_asgn.target()?;
+            let value = lower_expression(ctx, idx_asgn.value());
+            let value_span = idx_asgn
+                .value()
+                .map(|e| e.syntax().text_range())
+                .unwrap_or_default();
+            let value_idx = ctx.alloc(value, value_span);
+
+            match target {
+                ast::Expression::Index(idx_expr) => {
+                    let collection = idx_expr.collection().map(|e| {
+                        let span = e.syntax().text_range();
+                        let expr = lower_expression(ctx, Some(e));
+                        ctx.alloc(expr, span)
+                    })?;
+                    let index = idx_expr.index().map(|e| {
+                        let span = e.syntax().text_range();
+                        let expr = lower_expression(ctx, Some(e));
+                        ctx.alloc(expr, span)
+                    })?;
+                    Some(BlockItem::IndexAssignment {
+                        collection,
+                        index,
+                        value: value_idx,
+                    })
+                }
+                _ => None,
+            }
         }
         ast::Item::ReturnStatement(ret) => {
             let value = ret.value().map(|e| {

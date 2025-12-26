@@ -637,8 +637,8 @@ impl<'a> Vm<'a> {
                     let list_data = self.heap.get_list(list_idx);
                     let len = list_data.elements.len();
 
-                    // i64::MIN is sentinel for "missing"
-                    let start_idx = if start_val == i64::MIN {
+                    // SLICE_MISSING is sentinel for "missing" bounds
+                    let start_idx = if start_val == compile::SLICE_MISSING {
                         0
                     } else if start_val < 0 {
                         (len as i64 + start_val).max(0) as usize
@@ -646,7 +646,7 @@ impl<'a> Vm<'a> {
                         (start_val as usize).min(len)
                     };
 
-                    let end_idx = if end_val == i64::MIN {
+                    let end_idx = if end_val == compile::SLICE_MISSING {
                         len
                     } else if end_val < 0 {
                         (len as i64 + end_val).max(0) as usize

@@ -443,12 +443,12 @@ impl<'a> Compiler<'a> {
                 end,
             } => {
                 let list_slot = self.load_operand(list);
-                // Use i64::MIN as sentinel for "missing" bounds
+                // Use SLICE_MISSING sentinel for "missing" bounds
                 let start_slot = match start {
                     Some(s) => self.load_operand(s),
                     None => {
                         let slot = self.alloc_slot();
-                        self.writer.emit_load_int(slot, i64::MIN);
+                        self.writer.emit_load_int(slot, crate::SLICE_MISSING);
                         slot
                     }
                 };
@@ -456,7 +456,7 @@ impl<'a> Compiler<'a> {
                     Some(e) => self.load_operand(e),
                     None => {
                         let slot = self.alloc_slot();
-                        self.writer.emit_load_int(slot, i64::MIN);
+                        self.writer.emit_load_int(slot, crate::SLICE_MISSING);
                         slot
                     }
                 };

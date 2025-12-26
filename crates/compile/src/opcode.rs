@@ -99,3 +99,8 @@ impl Opcode {
 
 /// Sentinel value for "no slot" in optional slot fields
 pub const NO_SLOT: u8 = 0xFF;
+
+/// Sentinel value for "missing" slice bounds.
+/// Must fit in 48-bit NaN-boxed payload (so NOT i64::MIN).
+/// Uses largest magnitude negative 48-bit value: -(2^47) = -140737488355328
+pub const SLICE_MISSING: i64 = -(1i64 << 47);

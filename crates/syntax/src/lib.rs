@@ -111,6 +111,7 @@ pub enum SyntaxKind {
     ListExpression,
     IndexExpression,
     SliceExpression,
+    IndexAssignment,
     ListType,
 }
 

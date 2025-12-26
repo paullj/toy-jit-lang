@@ -184,6 +184,7 @@ impl ReplApp {
                 hir::Item::Assignment { name, .. } => {
                     Some(format!("{} = {}", lower.resolve(*name), result))
                 }
+                hir::Item::IndexAssignment { .. } => None,
             }
         } else {
             None
@@ -265,6 +266,7 @@ fn get_item_type(
             .get(hir.resolve(*name))
             .cloned()
             .unwrap_or(infer::Type::Integer),
+        hir::Item::IndexAssignment { .. } => infer::Type::Unit,
         hir::Item::Expression(expr) => get_expr_type(expr, hir, infer),
     }
 }

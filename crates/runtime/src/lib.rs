@@ -183,6 +183,7 @@ fn get_item_type(item: &Item, hir: &LowerResult, inferred: &InferenceResult) -> 
             .get_variable_type(hir.resolve(*name))
             .cloned()
             .unwrap_or(Type::Integer),
+        Item::IndexAssignment { .. } => Type::Unit,
         Item::Expression(expr) => get_expr_type(expr, hir, inferred),
     }
 }

@@ -145,6 +145,12 @@ impl<'a> Parser<'a> {
         self.delimiter_depth == 0 && self.source.has_newline_before_next()
     }
 
+    /// Check if the current `[...]` is an index/slice expression (no comma at depth 1)
+    /// rather than a list literal (has commas).
+    pub(crate) fn is_bracket_index_not_list(&mut self) -> bool {
+        self.source.is_bracket_index_not_list()
+    }
+
     /// Recover by skipping tokens until recovery set, wrapping skipped in Error node
     pub(crate) fn recover(&mut self, msg: &str, recovery: TokenSet) -> Option<CompletedMarker> {
         // Don't skip if already at recovery point or end

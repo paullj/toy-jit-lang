@@ -75,8 +75,15 @@ fn expression_with_binding_power(p: &mut Parser, min_bp: u8) -> Option<Completed
 
     // Handle postfix operations (call expressions, index/slice)
     loop {
+        // Check for newline terminator, but allow `[` to continue if it's an index
+        // expression (not a list literal). This allows `x\n[0]` to parse as `x[0]`.
         if p.at_newline_terminator() {
-            break;
+            // Special case: `[` after newline might be index, not list
+            if p.at(TokenKind::LeftBracket) && p.is_bracket_index_not_list() {
+                // Continue - this is an index expression
+            } else {
+                break;
+            }
         }
 
         if p.at(TokenKind::LeftParenthesis) {
@@ -438,7 +445,10 @@ fn list_expression(p: &mut Parser) -> CompletedMarker {
 }
 
 /// Parses index or slice: `expr[idx]` or `expr[start..end]`
-fn index_or_slice_expression(p: &mut Parser, collection: CompletedMarker) -> CompletedMarker {
+pub(crate) fn index_or_slice_expression(
+    p: &mut Parser,
+    collection: CompletedMarker,
+) -> CompletedMarker {
     debug_assert!(p.at(TokenKind::LeftBracket));
 
     let m = collection.precede(p);

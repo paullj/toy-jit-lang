@@ -4,6 +4,7 @@ use lex::{Lexer, Token};
 
 /// Token source that separates trivia from meaningful tokens
 pub struct Source<'a> {
+    source_text: &'a str,
     lexer: Peekable<Lexer<'a>>,
     buffer: Vec<Token<'a>>,
     last_span: Range<usize>,
@@ -20,6 +21,7 @@ impl<'a> Source<'a> {
     /// Creates a new token source from source code
     pub(crate) fn new(source: &'a str) -> Self {
         Self {
+            source_text: source,
             lexer: Lexer::new(source).peekable(),
             buffer: Vec::new(),
             last_span: source.len()..source.len(),
@@ -138,5 +140,60 @@ impl<'a> Source<'a> {
         self.buffer
             .iter()
             .any(|t| t.kind == lex::TokenKind::NewLine)
+    }
+
+    /// Lookahead to check if bracket expression is index/slice (not list literal).
+    /// Returns true if the `[...]` starting at current position contains no comma at depth 1.
+    /// Used to determine if `x\n[0]` should continue as postfix index.
+    /// This uses speculative re-lexing to avoid consuming tokens.
+    pub(crate) fn is_bracket_index_not_list(&mut self) -> bool {
+        use lex::TokenKind;
+
+        self.consume_trivia();
+
+        // Must be at `[`
+        let start_offset = match self.internal_peek() {
+            Some(t) if t.kind == TokenKind::LeftBracket => t.span.start,
+            _ => return false,
+        };
+
+        // Create a new lexer from current position for speculative scanning
+        let remaining = &self.source_text[start_offset..];
+        let mut scan_lexer = Lexer::new(remaining);
+
+        let mut depth: u32 = 0;
+
+        for result in scan_lexer.by_ref() {
+            let Ok(token) = result else { continue };
+
+            // Skip trivia
+            if token.kind.is_trivia() {
+                continue;
+            }
+
+            match token.kind {
+                TokenKind::LeftBracket | TokenKind::LeftParenthesis | TokenKind::LeftBrace => {
+                    depth += 1;
+                }
+                TokenKind::RightBracket => {
+                    if depth == 1 {
+                        // Found matching `]` - is index expression
+                        return true;
+                    }
+                    depth -= 1;
+                }
+                TokenKind::RightParenthesis | TokenKind::RightBrace => {
+                    depth = depth.saturating_sub(1);
+                }
+                TokenKind::Comma if depth == 1 => {
+                    // Found comma at depth 1 - is list expression
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
+        // EOF before closing - assume not a valid index (shouldn't happen normally)
+        false
     }
 }

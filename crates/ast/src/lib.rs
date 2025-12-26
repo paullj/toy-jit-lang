@@ -18,6 +18,7 @@ pub enum Item {
     FunctionDefinition(FunctionDefinition),
     VariableDefinition(VariableDefinition),
     VariableAssignment(VariableAssignment),
+    IndexAssignment(IndexAssignment),
     ReturnStatement(ReturnStatement),
     EchoStatement(EchoStatement),
     BreakStatement(BreakStatement),
@@ -31,6 +32,7 @@ impl Item {
             SyntaxKind::FunctionDefinition => Self::FunctionDefinition(FunctionDefinition(node)),
             SyntaxKind::VariableDefinition => Self::VariableDefinition(VariableDefinition(node)),
             SyntaxKind::VariableAssignment => Self::VariableAssignment(VariableAssignment(node)),
+            SyntaxKind::IndexAssignment => Self::IndexAssignment(IndexAssignment(node)),
             SyntaxKind::ReturnStatement => Self::ReturnStatement(ReturnStatement(node)),
             SyntaxKind::EchoStatement => Self::EchoStatement(EchoStatement(node)),
             SyntaxKind::BreakStatement => Self::BreakStatement(BreakStatement(node)),
@@ -45,6 +47,7 @@ impl Item {
             Item::FunctionDefinition(n) => n.syntax(),
             Item::VariableDefinition(n) => n.syntax(),
             Item::VariableAssignment(n) => n.syntax(),
+            Item::IndexAssignment(n) => n.syntax(),
             Item::ReturnStatement(n) => n.syntax(),
             Item::EchoStatement(n) => n.syntax(),
             Item::BreakStatement(n) => n.syntax(),
@@ -650,6 +653,20 @@ impl SliceExpression {
             }
         }
         None
+    }
+}
+
+ast_node!(IndexAssignment, SyntaxKind::IndexAssignment);
+
+impl IndexAssignment {
+    /// Get the target - either an IndexExpression or SliceExpression
+    pub fn target(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// Get the value being assigned
+    pub fn value(&self) -> Option<Expression> {
+        self.0.children().filter_map(Expression::cast).nth(1)
     }
 }
 

@@ -218,6 +218,8 @@ impl<'a> LowerCtx<'a> {
         self.next_block = 1;
         self.local_scopes = vec![HashMap::new()];
 
+        let mut last_expr_value: Option<Operand> = None;
+
         for item in &self.hir.items {
             match item {
                 Item::Definition(Definition::Function { name, .. }) => {
@@ -236,6 +238,7 @@ impl<'a> LowerCtx<'a> {
                         local,
                         src: Operand::VReg(dst),
                     });
+                    last_expr_value = None;
                 }
                 Item::Definition(Definition::Variable { name, value }) => {
                     let name_str = self.resolve(*name).to_string();
@@ -245,6 +248,7 @@ impl<'a> LowerCtx<'a> {
                         local,
                         src: operand,
                     });
+                    last_expr_value = None;
                 }
                 Item::Assignment { name, value } => {
                     let name_str = self.resolve(*name).to_string();
@@ -255,14 +259,32 @@ impl<'a> LowerCtx<'a> {
                             src: operand,
                         });
                     }
+                    last_expr_value = None;
+                }
+                Item::IndexAssignment {
+                    collection,
+                    index,
+                    value,
+                } => {
+                    let list = self.lower_expr_idx(*collection);
+                    let idx = self.lower_expr_idx(*index);
+                    let val = self.lower_expr(value);
+                    self.emit(Inst::ListSet {
+                        list,
+                        index: idx,
+                        value: val,
+                    });
+                    last_expr_value = None;
                 }
                 Item::Expression(expr) => {
-                    self.lower_expr(expr);
+                    last_expr_value = Some(self.lower_expr(expr));
                 }
             }
         }
 
-        self.emit(Inst::Return { value: None });
+        self.emit(Inst::Return {
+            value: last_expr_value,
+        });
 
         // Build main function
         self.blocks.push(std::mem::replace(
@@ -740,6 +762,20 @@ impl<'a> LowerCtx<'a> {
                             src: operand,
                         });
                     }
+                }
+                BlockItem::IndexAssignment {
+                    collection,
+                    index,
+                    value,
+                } => {
+                    let list = self.lower_expr_idx(*collection);
+                    let idx = self.lower_expr_idx(*index);
+                    let val = self.lower_expr_idx(*value);
+                    self.emit(Inst::ListSet {
+                        list,
+                        index: idx,
+                        value: val,
+                    });
                 }
                 BlockItem::Expression(idx) => {
                     self.lower_expr_idx(*idx);

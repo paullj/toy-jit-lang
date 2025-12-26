@@ -10,7 +10,7 @@ pub use bytecode::{ConstIdx, FuncIdx, Label, Slot};
 pub use chunk::{Chunk, CompiledModule};
 pub use compiler::compile;
 pub use constant::{Constant, ConstantPool};
-pub use opcode::{NO_SLOT, Opcode};
+pub use opcode::{NO_SLOT, Opcode, SLICE_MISSING};
 
 // Re-export lasso types for VM
 pub use lasso::{Rodeo, Spur};

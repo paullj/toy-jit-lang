@@ -260,6 +260,24 @@ impl<'a> InferCtx<'a> {
                     }
                 }
             }
+            Item::IndexAssignment {
+                collection,
+                index,
+                value,
+            } => {
+                let (collection_ty, coll_span) = self.infer_expr_idx(*collection);
+                let (index_ty, idx_span) = self.infer_expr_idx(*index);
+                let value_ty = self.infer_expr(value, span);
+                // Type check: collection should be list, index should be int
+                let elem_ty = Type::Var(self.fresh_var());
+                self.unify_or_error(
+                    &collection_ty,
+                    &Type::List(Box::new(elem_ty.clone())),
+                    coll_span,
+                );
+                self.unify_or_error(&index_ty, &Type::Integer, idx_span);
+                self.unify_or_error(&value_ty, &elem_ty, span);
+            }
             Item::Expression(expr) => {
                 self.infer_expr(expr, span);
             }
@@ -464,6 +482,23 @@ impl<'a> InferCtx<'a> {
                 }
                 BlockItem::Break { .. } => {}
                 BlockItem::Continue { .. } => {}
+                BlockItem::IndexAssignment {
+                    collection,
+                    index,
+                    value,
+                } => {
+                    let (collection_ty, coll_span) = self.infer_expr_idx(*collection);
+                    let (index_ty, idx_span) = self.infer_expr_idx(*index);
+                    let (value_ty, val_span) = self.infer_expr_idx(*value);
+                    let elem_ty = Type::Var(self.fresh_var());
+                    self.unify_or_error(
+                        &collection_ty,
+                        &Type::List(Box::new(elem_ty.clone())),
+                        coll_span,
+                    );
+                    self.unify_or_error(&index_ty, &Type::Integer, idx_span);
+                    self.unify_or_error(&value_ty, &elem_ty, val_span);
+                }
             }
         }
 

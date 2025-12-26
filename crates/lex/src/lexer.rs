@@ -56,6 +56,7 @@ mod tests {
     #[rstest]
     #[case("x := 10", &[TokenKind::Identifier, TokenKind::Whitespace, TokenKind::Colon, TokenKind::Equals, TokenKind::Whitespace, TokenKind::Integer])]
     #[case("x: int = 10", &[TokenKind::Identifier, TokenKind::Colon, TokenKind::Whitespace, TokenKind::Identifier, TokenKind::Whitespace, TokenKind::Equals, TokenKind::Whitespace, TokenKind::Integer])]
+    #[case("1..3", &[TokenKind::Integer, TokenKind::DotDot, TokenKind::Integer])]
     fn lex_kinds(#[case] input: &str, #[case] expected: &[TokenKind]) {
         assert_eq!(kinds(input), expected);
     }
