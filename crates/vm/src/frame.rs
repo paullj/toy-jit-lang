@@ -1,7 +1,7 @@
 //! Call frame for function invocation.
 
 /// Call frame for function invocation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CallFrame {
     pub return_pc: usize,
     pub return_chunk: usize,

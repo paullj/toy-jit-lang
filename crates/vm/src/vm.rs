@@ -7,21 +7,25 @@ use crate::error::RuntimeError;
 use crate::frame::CallFrame;
 use crate::value::{Heap, Value};
 
-/// Pre-allocated stack capacity (slots)
-const STACK_CAPACITY: usize = 8192;
-/// Pre-allocated frames capacity
-const FRAMES_CAPACITY: usize = 256;
+/// Maximum stack size (slots) - 8K slots = 128KB with 16-byte Values
+const MAX_STACK_SIZE: usize = 8192;
+/// Maximum call depth
+const MAX_FRAMES: usize = 256;
 
 /// Virtual machine state
 pub struct Vm<'a> {
-    /// Unified value stack (locals + temps for all frames)
-    stack: Vec<Value>,
+    /// Fixed-size value stack (locals + temps for all frames)
+    stack: Box<[Value; MAX_STACK_SIZE]>,
+    /// Current stack top (next free slot)
+    stack_top: usize,
     /// Heap for dynamic strings and closures
     heap: Heap,
     /// Interned string table (from compiled module)
     strings: &'a Rodeo,
-    /// Call frame stack
-    frames: Vec<CallFrame>,
+    /// Fixed-size call frame stack
+    frames: [CallFrame; MAX_FRAMES],
+    /// Number of active frames
+    frame_count: usize,
     chunks: &'a [Chunk],
     current_chunk: usize,
     /// Cached stack base (updated on call/return)
@@ -33,14 +37,13 @@ impl<'a> Vm<'a> {
         let main = module.main();
         let frame_size = main.local_count as usize + main.register_count as usize;
 
-        let mut stack = Vec::with_capacity(STACK_CAPACITY);
-        stack.resize(frame_size, Value::unit());
-
         Self {
-            stack,
+            stack: Box::new([Value::unit(); MAX_STACK_SIZE]),
+            stack_top: frame_size,
             heap: Heap::new(),
             strings: &module.strings,
-            frames: Vec::with_capacity(FRAMES_CAPACITY),
+            frames: [CallFrame::default(); MAX_FRAMES],
+            frame_count: 0, // main doesn't push a frame initially
             chunks: &module.chunks,
             current_chunk: module.main_idx,
             stack_base: 0, // main frame base is 0
@@ -57,7 +60,7 @@ impl<'a> Vm<'a> {
     #[inline(always)]
     fn get(&self, base: usize, slot: u8) -> Value {
         let idx = self.slot_idx(base, slot);
-        debug_assert!(idx < self.stack.len(), "slot {} out of bounds", slot);
+        debug_assert!(idx < self.stack_top, "slot {} out of bounds", slot);
         unsafe { *self.stack.get_unchecked(idx) }
     }
 
@@ -65,7 +68,7 @@ impl<'a> Vm<'a> {
     #[inline(always)]
     fn set(&mut self, base: usize, slot: u8, value: Value) {
         let idx = self.slot_idx(base, slot);
-        debug_assert!(idx < self.stack.len(), "slot {} out of bounds", slot);
+        debug_assert!(idx < self.stack_top, "slot {} out of bounds", slot);
         unsafe { *self.stack.get_unchecked_mut(idx) = value };
     }
 
@@ -95,10 +98,13 @@ impl<'a> Vm<'a> {
 
     /// Get current frame's closure index
     fn current_closure_idx(&self) -> Result<u32, RuntimeError> {
-        self.frames
-            .last()
-            .and_then(|f| f.closure_idx)
-            .ok_or(RuntimeError::NoClosure)
+        if self.frame_count > 0 {
+            self.frames[self.frame_count - 1]
+                .closure_idx
+                .ok_or(RuntimeError::NoClosure)
+        } else {
+            Err(RuntimeError::NoClosure)
+        }
     }
 
     fn do_call(
@@ -118,11 +124,19 @@ impl<'a> Vm<'a> {
         let caller_base = self.stack_base; // Use cached value
 
         // New frame starts at current stack top
-        let new_base = self.stack.len();
+        let new_base = self.stack_top;
         let new_frame_size = chunk.local_count as usize + chunk.register_count as usize;
+        let new_top = new_base + new_frame_size;
 
-        // Extend stack for new frame
-        self.stack.resize(new_base + new_frame_size, Value::unit());
+        // Check for stack overflow
+        if new_top > MAX_STACK_SIZE {
+            return Err(RuntimeError::StackOverflow);
+        }
+
+        // Initialize new frame slots to unit (args will be overwritten)
+        for i in new_base..new_top {
+            self.stack[i] = Value::unit();
+        }
 
         // Copy args to new frame's locals (slots 0..arg_count)
         let arg_start = caller_base + arg_base as usize;
@@ -130,17 +144,22 @@ impl<'a> Vm<'a> {
             self.stack[new_base + i] = self.stack[arg_start + i];
         }
 
-        // Compute result slot relative to caller's base
-        let result_slot = dst;
+        self.stack_top = new_top;
+
+        // Check for call stack overflow
+        if self.frame_count >= MAX_FRAMES {
+            return Err(RuntimeError::StackOverflow);
+        }
 
         // Push frame
-        self.frames.push(CallFrame {
+        self.frames[self.frame_count] = CallFrame {
             return_pc: reader.pc(),
             return_chunk: self.current_chunk,
             stack_base: new_base,
-            result_slot,
+            result_slot: dst,
             closure_idx,
-        });
+        };
+        self.frame_count += 1;
 
         self.stack_base = new_base; // Update cache
         self.current_chunk = func_idx;
@@ -447,16 +466,23 @@ impl<'a> Vm<'a> {
                         self.get(base, src)
                     };
 
-                    if let Some(frame) = self.frames.pop() {
+                    if self.frame_count > 0 {
+                        self.frame_count -= 1;
+                        let frame = self.frames[self.frame_count];
+
                         // Return to caller
                         self.current_chunk = frame.return_chunk;
 
-                        // Update stack_base to caller's base
-                        self.stack_base = self.frames.last().map(|f| f.stack_base).unwrap_or(0);
-                        let caller_base = self.stack_base;
+                        // Deallocate frame by resetting stack_top
+                        self.stack_top = frame.stack_base;
 
-                        // Truncate stack (deallocate this frame)
-                        self.stack.truncate(frame.stack_base);
+                        // Update stack_base to caller's base
+                        self.stack_base = if self.frame_count > 0 {
+                            self.frames[self.frame_count - 1].stack_base
+                        } else {
+                            0
+                        };
+                        let caller_base = self.stack_base;
 
                         // Store result in caller's slot
                         if let Some(slot) = frame.result_slot {
@@ -548,14 +574,14 @@ impl<'a> Vm<'a> {
 
     /// Collect GC roots from VM state.
     fn gc_roots(&self) -> Vec<Value> {
-        let mut roots = Vec::with_capacity(self.stack.len() + self.frames.len());
+        let mut roots = Vec::with_capacity(self.stack_top + self.frame_count);
 
-        // All stack values are roots
-        roots.extend(self.stack.iter().copied());
+        // All active stack values are roots
+        roots.extend(self.stack[..self.stack_top].iter().copied());
 
-        // Closure indices from call frames are roots
-        for frame in &self.frames {
-            if let Some(closure_idx) = frame.closure_idx {
+        // Closure indices from active call frames are roots
+        for i in 0..self.frame_count {
+            if let Some(closure_idx) = self.frames[i].closure_idx {
                 roots.push(Value::closure(closure_idx));
             }
         }
