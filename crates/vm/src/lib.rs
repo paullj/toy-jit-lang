@@ -1,5 +1,6 @@
 //! Bytecode interpreter for the toy language.
 
+mod bytecode_reader;
 mod error;
 mod frame;
 mod value;

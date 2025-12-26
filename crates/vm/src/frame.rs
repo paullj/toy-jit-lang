@@ -8,7 +8,7 @@ pub struct CallFrame {
     /// Base index into the unified stack for this frame
     pub stack_base: usize,
     /// Result slot relative to caller's stack_base (if any)
-    pub result_slot: Option<u32>,
+    pub result_slot: Option<u8>,
     /// Closure index in heap (if called via closure)
     pub closure_idx: Option<u32>,
 }

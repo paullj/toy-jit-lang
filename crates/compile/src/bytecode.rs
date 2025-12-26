@@ -40,7 +40,8 @@ impl fmt::Display for FuncIdx {
     }
 }
 
-/// Bytecode instruction
+/// Legacy bytecode instruction enum (kept for reference, no longer used)
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     // Loads
