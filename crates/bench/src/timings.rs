@@ -54,11 +54,13 @@ impl PipelineStats {
         let mut var_mir = 0.0;
         let mut var_compile = 0.0;
         let mut var_vm_exec = 0.0;
+        let mut var_vm_gc_time = 0.0;
         let mut var_jit_warmup = 0.0;
         let mut var_jit_compile = 0.0;
         let mut var_jit_exec = 0.0;
 
         let mut vm_exec_count = 0;
+        let mut vm_gc_time_count = 0;
         let mut jit_warmup_count = 0;
         let mut jit_compile_count = 0;
         let mut jit_exec_count = 0;
@@ -74,6 +76,10 @@ impl PipelineStats {
             if let (Some(v), Some(a)) = (s.vm_exec, avg.vm_exec) {
                 var_vm_exec += (v.as_nanos() as f64 - a.as_nanos() as f64).powi(2);
                 vm_exec_count += 1;
+            }
+            if let (Some(v), Some(a)) = (s.vm_gc_time, avg.vm_gc_time) {
+                var_vm_gc_time += (v.as_nanos() as f64 - a.as_nanos() as f64).powi(2);
+                vm_gc_time_count += 1;
             }
             if let (Some(v), Some(a)) = (s.jit_warmup, avg.jit_warmup) {
                 var_jit_warmup += (v.as_nanos() as f64 - a.as_nanos() as f64).powi(2);
@@ -112,6 +118,16 @@ impl PipelineStats {
             } else {
                 None
             },
+            vm_gc_time: if vm_gc_time_count > 0 {
+                Some(Duration::from_nanos(stddev_nanos(
+                    var_vm_gc_time,
+                    vm_gc_time_count,
+                )))
+            } else {
+                None
+            },
+            // GC collections stddev not meaningful (count varies with heap pressure)
+            vm_gc_collections: avg.vm_gc_collections,
             jit_warmup: if jit_warmup_count > 0 {
                 Some(Duration::from_nanos(stddev_nanos(
                     var_jit_warmup,
@@ -247,6 +263,8 @@ pub struct PipelineTimings {
     pub mir: Duration,
     pub compile: Duration,
     pub vm_exec: Option<Duration>,
+    pub vm_gc_time: Option<Duration>,
+    pub vm_gc_collections: Option<u64>,
     pub jit_warmup: Option<Duration>,
     pub jit_compile: Option<Duration>,
     pub jit_exec: Option<Duration>,
@@ -299,6 +317,16 @@ impl PipelineTimings {
                 (Some(a), None) | (None, Some(a)) => Some(a),
                 (None, None) => None,
             },
+            vm_gc_time: match (self.vm_gc_time, other.vm_gc_time) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) | (None, Some(a)) => Some(a),
+                (None, None) => None,
+            },
+            vm_gc_collections: match (self.vm_gc_collections, other.vm_gc_collections) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) | (None, Some(a)) => Some(a),
+                (None, None) => None,
+            },
             jit_warmup: match (self.jit_warmup, other.jit_warmup) {
                 (Some(a), Some(b)) => Some(a + b),
                 (Some(a), None) | (None, Some(a)) => Some(a),
@@ -328,6 +356,8 @@ impl PipelineTimings {
             mir: self.mir / n,
             compile: self.compile / n,
             vm_exec: self.vm_exec.map(|d| d / n),
+            vm_gc_time: self.vm_gc_time.map(|d| d / n),
+            vm_gc_collections: self.vm_gc_collections.map(|c| c / n as u64),
             jit_warmup: self.jit_warmup.map(|d| d / n),
             jit_compile: self.jit_compile.map(|d| d / n),
             jit_exec: self.jit_exec.map(|d| d / n),
@@ -363,6 +393,14 @@ impl PipelineTimings {
         ));
         if let Some(t) = self.vm_exec {
             s.push_str(&format!("  vm_exec:     {:>12}\n", format_duration(t)));
+        }
+        if let Some(t) = self.vm_gc_time {
+            let count = self.vm_gc_collections.unwrap_or(0);
+            s.push_str(&format!(
+                "  vm_gc:       {:>12} ({} collections)\n",
+                format_duration(t),
+                count
+            ));
         }
         if let Some(t) = self.jit_warmup {
             s.push_str(&format!("  jit_warmup:  {:>12}\n", format_duration(t)));
@@ -423,6 +461,12 @@ impl PipelineTimings {
         );
         if let Some(t) = self.vm_exec {
             map.insert("vm_exec_us".to_string(), (t.as_micros() as u64).into());
+        }
+        if let Some(t) = self.vm_gc_time {
+            map.insert("vm_gc_time_us".to_string(), (t.as_micros() as u64).into());
+        }
+        if let Some(c) = self.vm_gc_collections {
+            map.insert("vm_gc_collections".to_string(), c.into());
         }
         map.insert(
             "vm_total_us".to_string(),

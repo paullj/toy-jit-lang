@@ -589,12 +589,27 @@ impl<'a> Vm<'a> {
         }
     }
 
-    /// Collect GC roots from VM state.
+    /// Collect GC roots from VM state. Only heap values (closures, dynamic strings).
     fn gc_roots(&self) -> Vec<Value> {
-        let mut roots = Vec::with_capacity(self.stack_top + self.frame_count);
+        // Pre-count heap values to avoid over-allocation
+        let heap_count = self.stack[..self.stack_top]
+            .iter()
+            .filter(|v| v.is_heap_value())
+            .count();
+        let frame_closures = self.frames[..self.frame_count]
+            .iter()
+            .filter(|f| f.closure_idx.is_some())
+            .count();
 
-        // All active stack values are roots
-        roots.extend(self.stack[..self.stack_top].iter().copied());
+        let mut roots = Vec::with_capacity(heap_count + frame_closures);
+
+        // Only heap values from stack are roots (filter out ints, bools, floats, etc.)
+        roots.extend(
+            self.stack[..self.stack_top]
+                .iter()
+                .copied()
+                .filter(|v| v.is_heap_value()),
+        );
 
         // Closure indices from active call frames are roots
         for i in 0..self.frame_count {
