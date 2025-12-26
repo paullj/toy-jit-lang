@@ -1,87 +1,301 @@
 use std::fmt;
 
-use crate::bytecode::Instruction;
 use crate::chunk::{Chunk, CompiledModule};
+use crate::opcode::{NO_SLOT, Opcode};
 
-impl fmt::Display for Instruction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Instruction::LoadInt { dst, value } => write!(f, "load.i {} {}", dst, value),
-            Instruction::LoadBool { dst, value } => write!(f, "load.b {} {}", dst, value),
-            Instruction::LoadConst { dst, idx } => write!(f, "load.c {} {}", dst, idx),
-            Instruction::Move { dst, src } => write!(f, "move {} {}", dst, src),
+/// Disassemble a single instruction at the given offset, returning the next offset.
+fn disassemble_inst(code: &[u8], offset: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{:4}: ", offset)?;
 
-            Instruction::AddInt { dst, lhs, rhs } => write!(f, "add.i {} {} {}", dst, lhs, rhs),
-            Instruction::SubInt { dst, lhs, rhs } => write!(f, "sub.i {} {} {}", dst, lhs, rhs),
-            Instruction::MulInt { dst, lhs, rhs } => write!(f, "mul.i {} {} {}", dst, lhs, rhs),
-            Instruction::DivInt { dst, lhs, rhs } => write!(f, "div.i {} {} {}", dst, lhs, rhs),
-            Instruction::ModInt { dst, lhs, rhs } => write!(f, "mod.i {} {} {}", dst, lhs, rhs),
-            Instruction::NegInt { dst, src } => write!(f, "neg.i {} {}", dst, src),
+    let op_byte = code[offset];
+    let op = Opcode::from_u8(op_byte).expect("invalid opcode");
 
-            Instruction::AddFloat { dst, lhs, rhs } => write!(f, "add.f {} {} {}", dst, lhs, rhs),
-            Instruction::SubFloat { dst, lhs, rhs } => write!(f, "sub.f {} {} {}", dst, lhs, rhs),
-            Instruction::MulFloat { dst, lhs, rhs } => write!(f, "mul.f {} {} {}", dst, lhs, rhs),
-            Instruction::DivFloat { dst, lhs, rhs } => write!(f, "div.f {} {} {}", dst, lhs, rhs),
-            Instruction::NegFloat { dst, src } => write!(f, "neg.f {} {}", dst, src),
-
-            Instruction::EqInt { dst, lhs, rhs } => write!(f, "eq.i {} {} {}", dst, lhs, rhs),
-            Instruction::NeInt { dst, lhs, rhs } => write!(f, "ne.i {} {} {}", dst, lhs, rhs),
-            Instruction::LtInt { dst, lhs, rhs } => write!(f, "lt.i {} {} {}", dst, lhs, rhs),
-            Instruction::LeInt { dst, lhs, rhs } => write!(f, "le.i {} {} {}", dst, lhs, rhs),
-            Instruction::GtInt { dst, lhs, rhs } => write!(f, "gt.i {} {} {}", dst, lhs, rhs),
-            Instruction::GeInt { dst, lhs, rhs } => write!(f, "ge.i {} {} {}", dst, lhs, rhs),
-
-            Instruction::LtFloat { dst, lhs, rhs } => write!(f, "lt.f {} {} {}", dst, lhs, rhs),
-            Instruction::LeFloat { dst, lhs, rhs } => write!(f, "le.f {} {} {}", dst, lhs, rhs),
-            Instruction::GtFloat { dst, lhs, rhs } => write!(f, "gt.f {} {} {}", dst, lhs, rhs),
-            Instruction::GeFloat { dst, lhs, rhs } => write!(f, "ge.f {} {} {}", dst, lhs, rhs),
-
-            Instruction::Not { dst, src } => write!(f, "not {} {}", dst, src),
-
-            Instruction::Jump { target } => write!(f, "jump {}", target),
-            Instruction::JumpIf { cond, target } => write!(f, "jump.if {} {}", cond, target),
-            Instruction::JumpIfNot { cond, target } => write!(f, "jump.ifn {} {}", cond, target),
-
-            Instruction::Call {
-                dst,
-                func_idx,
-                arg_base,
-                arg_count,
-            } => match dst {
-                Some(d) => write!(f, "call {} {} {} {}", d, func_idx, arg_base, arg_count),
-                None => write!(f, "call _ {} {} {}", func_idx, arg_base, arg_count),
-            },
-            Instruction::CallIndirect {
-                dst,
-                callee,
-                arg_base,
-                arg_count,
-            } => match dst {
-                Some(d) => write!(f, "call.i {} {} {} {}", d, callee, arg_base, arg_count),
-                None => write!(f, "call.i _ {} {} {}", callee, arg_base, arg_count),
-            },
-            Instruction::Return { src } => match src {
-                Some(r) => write!(f, "ret {}", r),
-                None => write!(f, "ret"),
-            },
-
-            Instruction::MakeClosure {
-                dst,
-                func_idx,
-                capture_base,
-                capture_count,
-            } => write!(
-                f,
-                "closure {} {} {} {}",
-                dst, func_idx, capture_base, capture_count
-            ),
-            Instruction::LoadCapture { dst, index } => write!(f, "load.cap {} {}", dst, index),
-            Instruction::StoreCapture { index, src } => write!(f, "store.cap {} {}", index, src),
-
-            Instruction::Echo { src } => write!(f, "echo {}", src),
-
-            Instruction::Halt => write!(f, "halt"),
+    match op {
+        Opcode::LoadInt => {
+            let dst = code[offset + 1];
+            let value = i64::from_le_bytes(code[offset + 2..offset + 10].try_into().unwrap());
+            writeln!(f, "load.i s{} {}", dst, value)
         }
+        Opcode::LoadBool => {
+            let dst = code[offset + 1];
+            let value = code[offset + 2] != 0;
+            writeln!(f, "load.b s{} {}", dst, value)
+        }
+        Opcode::LoadConst => {
+            let dst = code[offset + 1];
+            let idx = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            writeln!(f, "load.c s{} c{}", dst, idx)
+        }
+        Opcode::Move => {
+            let dst = code[offset + 1];
+            let src = code[offset + 2];
+            writeln!(f, "move s{} s{}", dst, src)
+        }
+        Opcode::AddInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "add.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::SubInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "sub.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::MulInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "mul.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::DivInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "div.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::ModInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "mod.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::NegInt => {
+            let dst = code[offset + 1];
+            let src = code[offset + 2];
+            writeln!(f, "neg.i s{} s{}", dst, src)
+        }
+        Opcode::AddFloat => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "add.f s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::SubFloat => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "sub.f s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::MulFloat => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "mul.f s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::DivFloat => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "div.f s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::NegFloat => {
+            let dst = code[offset + 1];
+            let src = code[offset + 2];
+            writeln!(f, "neg.f s{} s{}", dst, src)
+        }
+        Opcode::EqInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "eq.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::NeInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "ne.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::LtInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "lt.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::LeInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "le.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::GtInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "gt.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::GeInt => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "ge.i s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::LtFloat => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "lt.f s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::LeFloat => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "le.f s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::GtFloat => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "gt.f s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::GeFloat => {
+            let dst = code[offset + 1];
+            let lhs = code[offset + 2];
+            let rhs = code[offset + 3];
+            writeln!(f, "ge.f s{} s{} s{}", dst, lhs, rhs)
+        }
+        Opcode::Not => {
+            let dst = code[offset + 1];
+            let src = code[offset + 2];
+            writeln!(f, "not s{} s{}", dst, src)
+        }
+        Opcode::JumpFwd => {
+            let rel_offset = u16::from_le_bytes([code[offset + 1], code[offset + 2]]);
+            let target = offset + 3 + rel_offset as usize;
+            writeln!(f, "jump.fwd @{}", target)
+        }
+        Opcode::JumpBack => {
+            let rel_offset = u16::from_le_bytes([code[offset + 1], code[offset + 2]]);
+            let target = offset + 3 - rel_offset as usize;
+            writeln!(f, "jump.back @{}", target)
+        }
+        Opcode::JumpIfFwd => {
+            let cond = code[offset + 1];
+            let rel_offset = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let target = offset + 4 + rel_offset as usize;
+            writeln!(f, "jump.if.fwd s{} @{}", cond, target)
+        }
+        Opcode::JumpIfBack => {
+            let cond = code[offset + 1];
+            let rel_offset = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let target = offset + 4 - rel_offset as usize;
+            writeln!(f, "jump.if.back s{} @{}", cond, target)
+        }
+        Opcode::JumpIfNotFwd => {
+            let cond = code[offset + 1];
+            let rel_offset = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let target = offset + 4 + rel_offset as usize;
+            writeln!(f, "jump.ifn.fwd s{} @{}", cond, target)
+        }
+        Opcode::JumpIfNotBack => {
+            let cond = code[offset + 1];
+            let rel_offset = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let target = offset + 4 - rel_offset as usize;
+            writeln!(f, "jump.ifn.back s{} @{}", cond, target)
+        }
+        Opcode::Call => {
+            let dst = code[offset + 1];
+            let func_idx = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let arg_base = code[offset + 4];
+            let arg_count = code[offset + 5];
+            if dst == NO_SLOT {
+                writeln!(f, "call _ fn{} s{} {}", func_idx, arg_base, arg_count)
+            } else {
+                writeln!(
+                    f,
+                    "call s{} fn{} s{} {}",
+                    dst, func_idx, arg_base, arg_count
+                )
+            }
+        }
+        Opcode::CallIndirect => {
+            let dst = code[offset + 1];
+            let callee = code[offset + 2];
+            let arg_base = code[offset + 3];
+            let arg_count = code[offset + 4];
+            if dst == NO_SLOT {
+                writeln!(f, "call.i _ s{} s{} {}", callee, arg_base, arg_count)
+            } else {
+                writeln!(f, "call.i s{} s{} s{} {}", dst, callee, arg_base, arg_count)
+            }
+        }
+        Opcode::Return => {
+            let src = code[offset + 1];
+            if src == NO_SLOT {
+                writeln!(f, "ret")
+            } else {
+                writeln!(f, "ret s{}", src)
+            }
+        }
+        Opcode::MakeClosure => {
+            let dst = code[offset + 1];
+            let func_idx = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let capture_base = code[offset + 4];
+            let capture_count = code[offset + 5];
+            writeln!(
+                f,
+                "closure s{} fn{} s{} {}",
+                dst, func_idx, capture_base, capture_count
+            )
+        }
+        Opcode::LoadCapture => {
+            let dst = code[offset + 1];
+            let index = code[offset + 2];
+            writeln!(f, "load.cap s{} {}", dst, index)
+        }
+        Opcode::StoreCapture => {
+            let index = code[offset + 1];
+            let src = code[offset + 2];
+            writeln!(f, "store.cap {} s{}", index, src)
+        }
+        Opcode::Echo => {
+            let src = code[offset + 1];
+            writeln!(f, "echo s{}", src)
+        }
+        Opcode::Halt => {
+            writeln!(f, "halt")
+        }
+    }
+}
+
+/// Get instruction size in bytes
+fn inst_size(op: Opcode) -> usize {
+    match op {
+        Opcode::LoadInt => 10,  // op + dst + i64
+        Opcode::LoadBool => 3,  // op + dst + bool
+        Opcode::LoadConst => 4, // op + dst + idx:u16
+        Opcode::Move => 3,      // op + dst + src
+        Opcode::AddInt
+        | Opcode::SubInt
+        | Opcode::MulInt
+        | Opcode::DivInt
+        | Opcode::ModInt
+        | Opcode::AddFloat
+        | Opcode::SubFloat
+        | Opcode::MulFloat
+        | Opcode::DivFloat
+        | Opcode::EqInt
+        | Opcode::NeInt
+        | Opcode::LtInt
+        | Opcode::LeInt
+        | Opcode::GtInt
+        | Opcode::GeInt
+        | Opcode::LtFloat
+        | Opcode::LeFloat
+        | Opcode::GtFloat
+        | Opcode::GeFloat => 4, // op + dst + lhs + rhs
+        Opcode::NegInt | Opcode::NegFloat | Opcode::Not => 3, // op + dst + src
+        Opcode::JumpFwd | Opcode::JumpBack => 3, // op + offset:u16
+        Opcode::JumpIfFwd | Opcode::JumpIfBack | Opcode::JumpIfNotFwd | Opcode::JumpIfNotBack => 4, // op + cond + offset:u16
+        Opcode::Call => 6,         // op + dst + func:u16 + base + count
+        Opcode::CallIndirect => 5, // op + dst + callee + base + count
+        Opcode::Return => 2,       // op + src
+        Opcode::MakeClosure => 6,  // op + dst + func:u16 + base + count
+        Opcode::LoadCapture => 3,  // op + dst + idx
+        Opcode::StoreCapture => 3, // op + idx + src
+        Opcode::Echo => 2,         // op + src
+        Opcode::Halt => 1,         // op
     }
 }
 
@@ -101,8 +315,12 @@ impl fmt::Display for Chunk {
         }
 
         writeln!(f)?;
-        for (i, inst) in self.instructions.iter().enumerate() {
-            writeln!(f, "{:4}: {}", i, inst)?;
+
+        let mut offset = 0;
+        while offset < self.code.len() {
+            disassemble_inst(&self.code, offset, f)?;
+            let op = Opcode::from_u8(self.code[offset]).expect("invalid opcode");
+            offset += inst_size(op);
         }
         Ok(())
     }

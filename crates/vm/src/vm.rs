@@ -1,30 +1,35 @@
 //! Virtual machine state and execution.
 
-use compile::{Chunk, CompiledModule, ConstIdx, Instruction, Rodeo, Slot};
+use compile::{Chunk, CompiledModule, ConstIdx, NO_SLOT, Opcode, Rodeo};
 
+use crate::bytecode_reader::BytecodeReader;
 use crate::error::RuntimeError;
 use crate::frame::CallFrame;
 use crate::value::{Heap, Value};
 
-/// Pre-allocated stack capacity (slots)
-const STACK_CAPACITY: usize = 8192;
-/// Pre-allocated frames capacity
-const FRAMES_CAPACITY: usize = 256;
+/// Maximum stack size (slots) - 8K slots = 128KB with 16-byte Values
+const MAX_STACK_SIZE: usize = 8192;
+/// Maximum call depth
+const MAX_FRAMES: usize = 256;
 
 /// Virtual machine state
 pub struct Vm<'a> {
-    /// Unified value stack (locals + temps for all frames)
-    stack: Vec<Value>,
+    /// Fixed-size value stack (locals + temps for all frames)
+    stack: Box<[Value; MAX_STACK_SIZE]>,
+    /// Current stack top (next free slot)
+    stack_top: usize,
     /// Heap for dynamic strings and closures
     heap: Heap,
     /// Interned string table (from compiled module)
     strings: &'a Rodeo,
-    /// Call frame stack
-    frames: Vec<CallFrame>,
+    /// Fixed-size call frame stack
+    frames: [CallFrame; MAX_FRAMES],
+    /// Number of active frames
+    frame_count: usize,
     chunks: &'a [Chunk],
     current_chunk: usize,
-    pc: usize,
-    last_value: Value,
+    /// Cached stack base (updated on call/return)
+    stack_base: usize,
 }
 
 impl<'a> Vm<'a> {
@@ -32,136 +37,153 @@ impl<'a> Vm<'a> {
         let main = module.main();
         let frame_size = main.local_count as usize + main.register_count as usize;
 
-        let mut stack = Vec::with_capacity(STACK_CAPACITY);
-        stack.resize(frame_size, Value::unit());
-
         Self {
-            stack,
+            stack: Box::new([Value::unit(); MAX_STACK_SIZE]),
+            stack_top: frame_size,
             heap: Heap::new(),
             strings: &module.strings,
-            frames: Vec::with_capacity(FRAMES_CAPACITY),
+            frames: [CallFrame::default(); MAX_FRAMES],
+            frame_count: 0, // main doesn't push a frame initially
             chunks: &module.chunks,
             current_chunk: module.main_idx,
-            pc: 0,
-            last_value: Value::unit(),
+            stack_base: 0, // main frame base is 0
         }
-    }
-
-    /// Get current frame's stack base (0 for main)
-    #[inline(always)]
-    fn stack_base(&self) -> usize {
-        self.frames.last().map(|f| f.stack_base).unwrap_or(0)
     }
 
     /// Convert slot index to absolute stack index
     #[inline(always)]
-    fn slot_idx(&self, base: usize, slot: Slot) -> usize {
-        base + slot.0 as usize
+    fn slot_idx(&self, base: usize, slot: u8) -> usize {
+        base + slot as usize
     }
 
     /// Get value at slot (unchecked in release)
     #[inline(always)]
-    fn get(&self, base: usize, slot: Slot) -> Value {
+    fn get(&self, base: usize, slot: u8) -> Value {
         let idx = self.slot_idx(base, slot);
-        debug_assert!(idx < self.stack.len(), "slot {} out of bounds", slot.0);
+        debug_assert!(idx < self.stack_top, "slot {} out of bounds", slot);
         unsafe { *self.stack.get_unchecked(idx) }
     }
 
     /// Set value at slot (unchecked in release)
     #[inline(always)]
-    fn set(&mut self, base: usize, slot: Slot, value: Value) {
+    fn set(&mut self, base: usize, slot: u8, value: Value) {
         let idx = self.slot_idx(base, slot);
-        debug_assert!(idx < self.stack.len(), "slot {} out of bounds", slot.0);
+        debug_assert!(idx < self.stack_top, "slot {} out of bounds", slot);
         unsafe { *self.stack.get_unchecked_mut(idx) = value };
     }
 
-    /// Get int from slot
+    /// Get int from slot (unchecked in release)
     #[inline(always)]
-    fn get_int(&self, base: usize, slot: Slot) -> Result<i64, RuntimeError> {
-        let val = self.get(base, slot);
-        val.as_int().ok_or(RuntimeError::TypeMismatch {
-            expected: "Int",
-            got: val.type_name(),
-        })
+    fn get_int(&self, base: usize, slot: u8) -> i64 {
+        self.get(base, slot).as_int_unchecked()
     }
 
-    /// Get float from slot
+    /// Get float from slot (unchecked in release)
     #[inline(always)]
-    fn get_float(&self, base: usize, slot: Slot) -> Result<f64, RuntimeError> {
-        let val = self.get(base, slot);
-        val.as_float().ok_or(RuntimeError::TypeMismatch {
-            expected: "Float",
-            got: val.type_name(),
-        })
+    fn get_float(&self, base: usize, slot: u8) -> f64 {
+        self.get(base, slot).as_float_unchecked()
     }
 
-    /// Get bool from slot
+    /// Get bool from slot (unchecked in release)
     #[inline(always)]
-    fn get_bool(&self, base: usize, slot: Slot) -> Result<bool, RuntimeError> {
-        let val = self.get(base, slot);
-        val.as_bool().ok_or(RuntimeError::TypeMismatch {
-            expected: "Bool",
-            got: val.type_name(),
-        })
+    fn get_bool(&self, base: usize, slot: u8) -> bool {
+        self.get(base, slot).as_bool_unchecked()
     }
 
-    /// Get closure index from slot
+    /// Get closure index from slot (unchecked in release)
     #[inline(always)]
-    fn get_closure_idx(&self, base: usize, slot: Slot) -> Result<u32, RuntimeError> {
-        let val = self.get(base, slot);
-        val.as_closure_idx().ok_or(RuntimeError::NotAClosure)
+    fn get_closure_idx(&self, base: usize, slot: u8) -> u32 {
+        self.get(base, slot).as_closure_idx_unchecked()
     }
 
     /// Get current frame's closure index
     fn current_closure_idx(&self) -> Result<u32, RuntimeError> {
-        self.frames
-            .last()
-            .and_then(|f| f.closure_idx)
-            .ok_or(RuntimeError::NoClosure)
+        if self.frame_count > 0 {
+            self.frames[self.frame_count - 1]
+                .closure_idx
+                .ok_or(RuntimeError::NoClosure)
+        } else {
+            Err(RuntimeError::NoClosure)
+        }
     }
 
+    #[inline(always)]
     fn do_call(
         &mut self,
-        dst: Option<Slot>,
+        reader: &mut BytecodeReader,
+        dst: Option<u8>,
         func_idx: usize,
-        arg_base: Slot,
+        arg_base: u8,
         arg_count: u8,
         closure_idx: Option<u32>,
     ) -> Result<(), RuntimeError> {
-        let chunk = self
-            .chunks
-            .get(func_idx)
-            .ok_or(RuntimeError::InvalidFunction(func_idx as u32))?;
+        // SAFETY: func_idx validated at compile time; bounds checked in debug mode
+        debug_assert!(func_idx < self.chunks.len(), "invalid function index");
+        let chunk = unsafe { self.chunks.get_unchecked(func_idx) };
 
-        let caller_base = self.stack_base();
+        let caller_base = self.stack_base; // Use cached value
 
         // New frame starts at current stack top
-        let new_base = self.stack.len();
+        let new_base = self.stack_top;
         let new_frame_size = chunk.local_count as usize + chunk.register_count as usize;
+        let new_top = new_base + new_frame_size;
 
-        // Extend stack for new frame
-        self.stack.resize(new_base + new_frame_size, Value::unit());
-
-        // Copy args to new frame's locals (slots 0..arg_count)
-        let arg_start = caller_base + arg_base.0 as usize;
-        for i in 0..arg_count as usize {
-            self.stack[new_base + i] = self.stack[arg_start + i];
+        // Check for stack overflow
+        if new_top > MAX_STACK_SIZE {
+            return Err(RuntimeError::StackOverflow);
         }
 
-        // Compute result slot relative to caller's base
-        let result_slot = dst.map(|s| s.0);
+        // Copy args first, then zero remaining slots (avoids redundant zeroing)
+        let arg_start = caller_base + arg_base as usize;
+        match arg_count {
+            0 => {}
+            1 => {
+                self.stack[new_base] = self.stack[arg_start];
+            }
+            2 => {
+                self.stack[new_base] = self.stack[arg_start];
+                self.stack[new_base + 1] = self.stack[arg_start + 1];
+            }
+            3 => {
+                self.stack[new_base] = self.stack[arg_start];
+                self.stack[new_base + 1] = self.stack[arg_start + 1];
+                self.stack[new_base + 2] = self.stack[arg_start + 2];
+            }
+            _ => {
+                for i in 0..arg_count as usize {
+                    self.stack[new_base + i] = self.stack[arg_start + i];
+                }
+            }
+        }
+
+        // Zero remaining slots (after args)
+        let arg_end = new_base + arg_count as usize;
+        for i in arg_end..new_top {
+            self.stack[i] = Value::unit();
+        }
+
+        self.stack_top = new_top;
+
+        // Check for call stack overflow
+        if self.frame_count >= MAX_FRAMES {
+            return Err(RuntimeError::StackOverflow);
+        }
 
         // Push frame
-        self.frames.push(CallFrame {
-            return_pc: self.pc,
+        self.frames[self.frame_count] = CallFrame {
+            return_pc: reader.pc(),
             return_chunk: self.current_chunk,
             stack_base: new_base,
-            result_slot,
+            result_slot: dst,
             closure_idx,
-        });
+        };
+        self.frame_count += 1;
 
+        self.stack_base = new_base; // Update cache
         self.current_chunk = func_idx;
-        self.pc = 0;
+
+        // Switch reader to new chunk code (avoids re-indexing after return)
+        reader.switch_code(&chunk.code, 0);
 
         Ok(())
     }
@@ -169,266 +191,355 @@ impl<'a> Vm<'a> {
     /// Execute the VM until completion. Returns (result, heap).
     /// If the result is an interned string, it's resolved to a dynamic string for portability.
     pub fn execute(mut self) -> Result<(Value, Heap), RuntimeError> {
+        let mut reader = BytecodeReader::new(&self.chunks[self.current_chunk].code);
+
         loop {
-            let chunk = &self.chunks[self.current_chunk];
-            if self.pc >= chunk.instructions.len() {
-                break;
-            }
+            // Use cached stack base for this instruction
+            let base = self.stack_base;
+            let opcode = reader.read_opcode();
 
-            let inst = &chunk.instructions[self.pc];
-            self.pc += 1;
-
-            // Cache stack base for this instruction
-            let base = self.stack_base();
-
-            match *inst {
+            match opcode {
                 // Loads
-                Instruction::LoadInt { dst, value } => {
-                    let val = Value::int(value);
-                    self.set(base, dst, val);
-                    self.last_value = val;
+                Opcode::LoadInt => {
+                    let dst = reader.read_u8();
+                    let value = reader.read_i64();
+                    self.set(base, dst, Value::int(value));
                 }
-                Instruction::LoadBool { dst, value } => {
-                    let val = Value::bool(value);
-                    self.set(base, dst, val);
-                    self.last_value = val;
+                Opcode::LoadBool => {
+                    let dst = reader.read_u8();
+                    let value = reader.read_u8() != 0;
+                    self.set(base, dst, Value::bool(value));
                 }
-                Instruction::LoadConst { dst, idx } => {
-                    let val = self.load_const(&chunk.constants, idx)?;
-                    self.last_value = val;
+                Opcode::LoadConst => {
+                    let dst = reader.read_u8();
+                    let idx = reader.read_u16();
+                    let chunk = &self.chunks[self.current_chunk];
+                    let val = self.load_const(&chunk.constants, ConstIdx(idx as u32))?;
                     self.set(base, dst, val);
                 }
 
                 // Move
-                Instruction::Move { dst, src } => {
+                Opcode::Move => {
+                    let dst = reader.read_u8();
+                    let src = reader.read_u8();
                     let val = self.get(base, src);
-                    self.last_value = val;
                     self.set(base, dst, val);
                 }
 
                 // Integer arithmetic
-                Instruction::AddInt { dst, lhs, rhs } => {
-                    let result = Value::int(self.get_int(base, lhs)? + self.get_int(base, rhs)?);
+                Opcode::AddInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::int(self.get_int(base, lhs) + self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::SubInt { dst, lhs, rhs } => {
-                    let result = Value::int(self.get_int(base, lhs)? - self.get_int(base, rhs)?);
+                Opcode::SubInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::int(self.get_int(base, lhs) - self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::MulInt { dst, lhs, rhs } => {
-                    let result = Value::int(self.get_int(base, lhs)? * self.get_int(base, rhs)?);
+                Opcode::MulInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::int(self.get_int(base, lhs) * self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::DivInt { dst, lhs, rhs } => {
-                    let divisor = self.get_int(base, rhs)?;
+                Opcode::DivInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let divisor = self.get_int(base, rhs);
                     if divisor == 0 {
                         return Err(RuntimeError::DivisionByZero);
                     }
-                    let result = Value::int(self.get_int(base, lhs)? / divisor);
+                    let result = Value::int(self.get_int(base, lhs) / divisor);
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::ModInt { dst, lhs, rhs } => {
-                    let divisor = self.get_int(base, rhs)?;
+                Opcode::ModInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let divisor = self.get_int(base, rhs);
                     if divisor == 0 {
                         return Err(RuntimeError::DivisionByZero);
                     }
-                    let result = Value::int(self.get_int(base, lhs)? % divisor);
+                    let result = Value::int(self.get_int(base, lhs) % divisor);
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::NegInt { dst, src } => {
-                    let result = Value::int(-self.get_int(base, src)?);
+                Opcode::NegInt => {
+                    let dst = reader.read_u8();
+                    let src = reader.read_u8();
+                    let result = Value::int(-self.get_int(base, src));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Float arithmetic
-                Instruction::AddFloat { dst, lhs, rhs } => {
+                Opcode::AddFloat => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
                     let result =
-                        Value::float(self.get_float(base, lhs)? + self.get_float(base, rhs)?);
+                        Value::float(self.get_float(base, lhs) + self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::SubFloat { dst, lhs, rhs } => {
+                Opcode::SubFloat => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
                     let result =
-                        Value::float(self.get_float(base, lhs)? - self.get_float(base, rhs)?);
+                        Value::float(self.get_float(base, lhs) - self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::MulFloat { dst, lhs, rhs } => {
+                Opcode::MulFloat => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
                     let result =
-                        Value::float(self.get_float(base, lhs)? * self.get_float(base, rhs)?);
+                        Value::float(self.get_float(base, lhs) * self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::DivFloat { dst, lhs, rhs } => {
+                Opcode::DivFloat => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
                     let result =
-                        Value::float(self.get_float(base, lhs)? / self.get_float(base, rhs)?);
+                        Value::float(self.get_float(base, lhs) / self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::NegFloat { dst, src } => {
-                    let result = Value::float(-self.get_float(base, src)?);
+                Opcode::NegFloat => {
+                    let dst = reader.read_u8();
+                    let src = reader.read_u8();
+                    let result = Value::float(-self.get_float(base, src));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Integer comparisons
-                Instruction::EqInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? == self.get_int(base, rhs)?);
+                Opcode::EqInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::bool(self.get_int(base, lhs) == self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::NeInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? != self.get_int(base, rhs)?);
+                Opcode::NeInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::bool(self.get_int(base, lhs) != self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::LtInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? < self.get_int(base, rhs)?);
+                Opcode::LtInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::bool(self.get_int(base, lhs) < self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::LeInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? <= self.get_int(base, rhs)?);
+                Opcode::LeInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::bool(self.get_int(base, lhs) <= self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::GtInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? > self.get_int(base, rhs)?);
+                Opcode::GtInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::bool(self.get_int(base, lhs) > self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::GeInt { dst, lhs, rhs } => {
-                    let result = Value::bool(self.get_int(base, lhs)? >= self.get_int(base, rhs)?);
+                Opcode::GeInt => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::bool(self.get_int(base, lhs) >= self.get_int(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Float comparisons
-                Instruction::LtFloat { dst, lhs, rhs } => {
-                    let result =
-                        Value::bool(self.get_float(base, lhs)? < self.get_float(base, rhs)?);
+                Opcode::LtFloat => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::bool(self.get_float(base, lhs) < self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::LeFloat { dst, lhs, rhs } => {
+                Opcode::LeFloat => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
                     let result =
-                        Value::bool(self.get_float(base, lhs)? <= self.get_float(base, rhs)?);
+                        Value::bool(self.get_float(base, lhs) <= self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::GtFloat { dst, lhs, rhs } => {
-                    let result =
-                        Value::bool(self.get_float(base, lhs)? > self.get_float(base, rhs)?);
+                Opcode::GtFloat => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
+                    let result = Value::bool(self.get_float(base, lhs) > self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
-                Instruction::GeFloat { dst, lhs, rhs } => {
+                Opcode::GeFloat => {
+                    let dst = reader.read_u8();
+                    let lhs = reader.read_u8();
+                    let rhs = reader.read_u8();
                     let result =
-                        Value::bool(self.get_float(base, lhs)? >= self.get_float(base, rhs)?);
+                        Value::bool(self.get_float(base, lhs) >= self.get_float(base, rhs));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
                 // Boolean
-                Instruction::Not { dst, src } => {
-                    let result = Value::bool(!self.get_bool(base, src)?);
+                Opcode::Not => {
+                    let dst = reader.read_u8();
+                    let src = reader.read_u8();
+                    let result = Value::bool(!self.get_bool(base, src));
                     self.set(base, dst, result);
-                    self.last_value = result;
                 }
 
-                // Control flow
-                Instruction::Jump { target } => {
-                    self.pc = target.0 as usize;
+                // Control flow - jumps
+                Opcode::JumpFwd => {
+                    let offset = reader.read_u16();
+                    reader.jump_forward(offset);
                 }
-                Instruction::JumpIf { cond, target } => {
-                    if self.get_bool(base, cond)? {
-                        self.pc = target.0 as usize;
+                Opcode::JumpBack => {
+                    let offset = reader.read_u16();
+                    reader.jump_backward(offset);
+                }
+                Opcode::JumpIfFwd => {
+                    let cond = reader.read_u8();
+                    let offset = reader.read_u16();
+                    if self.get_bool(base, cond) {
+                        reader.jump_forward(offset);
                     }
                 }
-                Instruction::JumpIfNot { cond, target } => {
-                    if !self.get_bool(base, cond)? {
-                        self.pc = target.0 as usize;
+                Opcode::JumpIfBack => {
+                    let cond = reader.read_u8();
+                    let offset = reader.read_u16();
+                    if self.get_bool(base, cond) {
+                        reader.jump_backward(offset);
+                    }
+                }
+                Opcode::JumpIfNotFwd => {
+                    let cond = reader.read_u8();
+                    let offset = reader.read_u16();
+                    if !self.get_bool(base, cond) {
+                        reader.jump_forward(offset);
+                    }
+                }
+                Opcode::JumpIfNotBack => {
+                    let cond = reader.read_u8();
+                    let offset = reader.read_u16();
+                    if !self.get_bool(base, cond) {
+                        reader.jump_backward(offset);
                     }
                 }
 
                 // Function calls
-                Instruction::Call {
-                    dst,
-                    func_idx,
-                    arg_base,
-                    arg_count,
-                } => {
-                    self.do_call(dst, func_idx.0 as usize, arg_base, arg_count, None)?;
+                Opcode::Call => {
+                    let dst = reader.read_u8();
+                    let func_idx = reader.read_u16();
+                    let arg_base = reader.read_u8();
+                    let arg_count = reader.read_u8();
+                    let dst_opt = if dst == NO_SLOT { None } else { Some(dst) };
+                    // do_call switches reader to new chunk's code
+                    self.do_call(
+                        &mut reader,
+                        dst_opt,
+                        func_idx as usize,
+                        arg_base,
+                        arg_count,
+                        None,
+                    )?;
                 }
 
-                Instruction::CallIndirect {
-                    dst,
-                    callee,
-                    arg_base,
-                    arg_count,
-                } => {
-                    let closure_idx = self.get_closure_idx(base, callee)?;
+                Opcode::CallIndirect => {
+                    let dst = reader.read_u8();
+                    let callee = reader.read_u8();
+                    let arg_base = reader.read_u8();
+                    let arg_count = reader.read_u8();
+                    let closure_idx = self.get_closure_idx(base, callee);
                     let func_idx = self.heap.get_closure(closure_idx).func_idx as usize;
-                    self.do_call(dst, func_idx, arg_base, arg_count, Some(closure_idx))?;
+                    let dst_opt = if dst == NO_SLOT { None } else { Some(dst) };
+                    // do_call switches reader to new chunk's code
+                    self.do_call(
+                        &mut reader,
+                        dst_opt,
+                        func_idx,
+                        arg_base,
+                        arg_count,
+                        Some(closure_idx),
+                    )?;
                 }
 
-                Instruction::Return { src } => {
-                    let result = match src {
-                        Some(s) => self.get(base, s),
-                        None => Value::unit(),
+                Opcode::Return => {
+                    let src = reader.read_u8();
+                    let result = if src == NO_SLOT {
+                        Value::unit()
+                    } else {
+                        self.get(base, src)
                     };
 
-                    if let Some(frame) = self.frames.pop() {
+                    if self.frame_count > 0 {
+                        self.frame_count -= 1;
+                        let frame = self.frames[self.frame_count];
+
                         // Return to caller
                         self.current_chunk = frame.return_chunk;
-                        self.pc = frame.return_pc;
 
-                        // Get caller's stack base before truncating
-                        let caller_base = self.stack_base();
+                        // Deallocate frame by resetting stack_top
+                        self.stack_top = frame.stack_base;
 
-                        // Truncate stack (deallocate this frame)
-                        self.stack.truncate(frame.stack_base);
+                        // Update stack_base to caller's base
+                        self.stack_base = if self.frame_count > 0 {
+                            self.frames[self.frame_count - 1].stack_base
+                        } else {
+                            0
+                        };
+                        let caller_base = self.stack_base;
 
                         // Store result in caller's slot
                         if let Some(slot) = frame.result_slot {
                             let idx = caller_base + slot as usize;
                             self.stack[idx] = result;
                         }
-                        self.last_value = result;
+
+                        // Switch reader back to caller's chunk and position (in-place)
+                        reader.switch_code(&self.chunks[self.current_chunk].code, frame.return_pc);
                     } else {
                         // Return from main
-                        self.last_value = result;
-                        break;
+                        let result = self.materialize_value(result);
+                        return Ok((result, self.heap));
                     }
                 }
 
                 // Closures
-                Instruction::MakeClosure {
-                    dst,
-                    func_idx,
-                    capture_base,
-                    capture_count,
-                } => {
+                Opcode::MakeClosure => {
+                    let dst = reader.read_u8();
+                    let func_idx = reader.read_u16();
+                    let capture_base = reader.read_u8();
+                    let capture_count = reader.read_u8();
+
                     // GC before allocation (while captures are still on stack as roots)
                     self.maybe_gc();
 
                     let mut captures = Vec::with_capacity(capture_count as usize);
                     for i in 0..capture_count {
-                        let idx = base + capture_base.0 as usize + i as usize;
+                        let idx = base + capture_base as usize + i as usize;
                         captures.push(self.stack[idx]);
                     }
 
-                    let closure_idx = self.heap.alloc_closure(func_idx.0, captures);
+                    let closure_idx = self.heap.alloc_closure(func_idx as u32, captures);
                     self.set(base, dst, Value::closure(closure_idx));
                 }
 
-                Instruction::LoadCapture { dst, index } => {
+                Opcode::LoadCapture => {
+                    let dst = reader.read_u8();
+                    let index = reader.read_u8();
                     let closure_idx = self.current_closure_idx()?;
                     let closure = self.heap.get_closure(closure_idx);
                     let val = closure
@@ -439,7 +550,9 @@ impl<'a> Vm<'a> {
                     self.set(base, dst, val);
                 }
 
-                Instruction::StoreCapture { index, src } => {
+                Opcode::StoreCapture => {
+                    let index = reader.read_u8();
+                    let src = reader.read_u8();
                     let val = self.get(base, src);
                     let closure_idx = self.current_closure_idx()?;
                     let closure = self.heap.get_closure(closure_idx);
@@ -451,21 +564,18 @@ impl<'a> Vm<'a> {
                 }
 
                 // I/O
-                Instruction::Echo { src } => {
+                Opcode::Echo => {
+                    let src = reader.read_u8();
                     let val = self.get(base, src);
                     println!("{}", val.display_with_interner(&self.heap, self.strings));
                 }
 
                 // End
-                Instruction::Halt => {
-                    break;
+                Opcode::Halt => {
+                    return Ok((Value::unit(), self.heap));
                 }
             }
         }
-
-        // Materialize interned strings in result so it's displayable without the interner
-        let result = self.materialize_value(self.last_value);
-        Ok((result, self.heap))
     }
 
     /// If value is an interned string, resolve it to a dynamic string.
@@ -481,14 +591,14 @@ impl<'a> Vm<'a> {
 
     /// Collect GC roots from VM state.
     fn gc_roots(&self) -> Vec<Value> {
-        let mut roots = Vec::with_capacity(self.stack.len() + self.frames.len());
+        let mut roots = Vec::with_capacity(self.stack_top + self.frame_count);
 
-        // All stack values are roots
-        roots.extend(self.stack.iter().copied());
+        // All active stack values are roots
+        roots.extend(self.stack[..self.stack_top].iter().copied());
 
-        // Closure indices from call frames are roots
-        for frame in &self.frames {
-            if let Some(closure_idx) = frame.closure_idx {
+        // Closure indices from active call frames are roots
+        for i in 0..self.frame_count {
+            if let Some(closure_idx) = self.frames[i].closure_idx {
                 roots.push(Value::closure(closure_idx));
             }
         }

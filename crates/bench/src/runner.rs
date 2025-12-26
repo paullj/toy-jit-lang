@@ -125,8 +125,7 @@ impl BenchRunner {
 
         // Collect code size metrics
         code_size.function_count = compiled.chunks.len();
-        code_size.bytecode_instructions =
-            compiled.chunks.iter().map(|c| c.instructions.len()).sum();
+        code_size.bytecode_instructions = compiled.chunks.iter().map(|c| c.code.len()).sum();
         code_size.constant_count = compiled.chunks.iter().map(|c| c.constants.len()).sum();
 
         // Execute

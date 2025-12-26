@@ -1,22 +1,22 @@
 use lasso::Rodeo;
 
-use crate::bytecode::Instruction;
 use crate::constant::ConstantPool;
 
-/// A compiled function/chunk
+/// A compiled function/chunk with compact bytecode
 #[derive(Debug, Clone)]
 pub struct Chunk {
-    pub instructions: Vec<Instruction>,
+    /// Compact bytecode (Vec<u8> instead of Vec<Instruction>)
+    pub code: Vec<u8>,
     pub constants: ConstantPool,
     pub param_count: u8,
-    pub local_count: u32,
-    pub register_count: u32,
+    pub local_count: u8,
+    pub register_count: u8,
 }
 
 impl Chunk {
     pub fn new() -> Self {
         Self {
-            instructions: Vec::new(),
+            code: Vec::new(),
             constants: ConstantPool::new(),
             param_count: 0,
             local_count: 0,
@@ -24,16 +24,12 @@ impl Chunk {
         }
     }
 
-    pub fn emit(&mut self, inst: Instruction) {
-        self.instructions.push(inst);
-    }
-
     pub fn len(&self) -> usize {
-        self.instructions.len()
+        self.code.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.instructions.is_empty()
+        self.code.is_empty()
     }
 }
 
