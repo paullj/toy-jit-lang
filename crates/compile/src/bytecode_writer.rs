@@ -366,6 +366,13 @@ impl BytecodeWriter {
         self.write_u8(start);
         self.write_u8(end);
     }
+
+    /// ListLen: dst:u8, list:u8
+    pub fn emit_list_len(&mut self, dst: u8, list: u8) {
+        self.emit_op(Opcode::ListLen);
+        self.write_u8(dst);
+        self.write_u8(list);
+    }
 }
 
 impl Default for BytecodeWriter {

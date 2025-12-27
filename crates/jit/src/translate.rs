@@ -4,7 +4,7 @@ use cranelift::codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift::prelude::*;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId as CraneliftFuncId, Linkage, Module};
-use mir::{BlockId, FuncId, Inst, LocalId, Operand, VReg};
+use mir::{BlockId, FuncId, Inst, LocalId, Operand, VReg, ValueType};
 
 use crate::JitError;
 
@@ -165,7 +165,8 @@ impl<'a> FunctionTranslator<'a> {
             | Inst::MakeClosure { dst, .. }
             | Inst::ListNew { dst, .. }
             | Inst::ListGet { dst, .. }
-            | Inst::ListSlice { dst, .. } => Some(*dst),
+            | Inst::ListSlice { dst, .. }
+            | Inst::ListLen { dst, .. } => Some(*dst),
             Inst::Call { dst, .. } | Inst::CallIndirect { dst, .. } => *dst,
             _ => None,
         }
@@ -220,35 +221,56 @@ impl<'a> FunctionTranslator<'a> {
                 let l = self.operand_to_float_with_vars(lhs, vreg_vars);
                 let r = self.operand_to_float_with_vars(rhs, vreg_vars);
                 let result = self.builder.ins().fadd(l, r);
-                self.builder.def_var(vreg_vars[dst], result);
-                self.last_value = Some(result);
+                // Store as i64 bits (all vars are i64)
+                let bits = self
+                    .builder
+                    .ins()
+                    .bitcast(self.int_type, MemFlags::new(), result);
+                self.builder.def_var(vreg_vars[dst], bits);
+                self.last_value = Some(bits);
             }
             Inst::SubFloat { dst, lhs, rhs } => {
                 let l = self.operand_to_float_with_vars(lhs, vreg_vars);
                 let r = self.operand_to_float_with_vars(rhs, vreg_vars);
                 let result = self.builder.ins().fsub(l, r);
-                self.builder.def_var(vreg_vars[dst], result);
-                self.last_value = Some(result);
+                let bits = self
+                    .builder
+                    .ins()
+                    .bitcast(self.int_type, MemFlags::new(), result);
+                self.builder.def_var(vreg_vars[dst], bits);
+                self.last_value = Some(bits);
             }
             Inst::MulFloat { dst, lhs, rhs } => {
                 let l = self.operand_to_float_with_vars(lhs, vreg_vars);
                 let r = self.operand_to_float_with_vars(rhs, vreg_vars);
                 let result = self.builder.ins().fmul(l, r);
-                self.builder.def_var(vreg_vars[dst], result);
-                self.last_value = Some(result);
+                let bits = self
+                    .builder
+                    .ins()
+                    .bitcast(self.int_type, MemFlags::new(), result);
+                self.builder.def_var(vreg_vars[dst], bits);
+                self.last_value = Some(bits);
             }
             Inst::DivFloat { dst, lhs, rhs } => {
                 let l = self.operand_to_float_with_vars(lhs, vreg_vars);
                 let r = self.operand_to_float_with_vars(rhs, vreg_vars);
                 let result = self.builder.ins().fdiv(l, r);
-                self.builder.def_var(vreg_vars[dst], result);
-                self.last_value = Some(result);
+                let bits = self
+                    .builder
+                    .ins()
+                    .bitcast(self.int_type, MemFlags::new(), result);
+                self.builder.def_var(vreg_vars[dst], bits);
+                self.last_value = Some(bits);
             }
             Inst::NegFloat { dst, src } => {
                 let v = self.operand_to_float_with_vars(src, vreg_vars);
                 let result = self.builder.ins().fneg(v);
-                self.builder.def_var(vreg_vars[dst], result);
-                self.last_value = Some(result);
+                let bits = self
+                    .builder
+                    .ins()
+                    .bitcast(self.int_type, MemFlags::new(), result);
+                self.builder.def_var(vreg_vars[dst], bits);
+                self.last_value = Some(bits);
             }
 
             Inst::EqInt { dst, lhs, rhs } => {
@@ -495,8 +517,12 @@ impl<'a> FunctionTranslator<'a> {
                     .ins()
                     .store(MemFlags::new(), val, env_ptr, offset);
             }
-            Inst::Echo { .. } => {
-                // Not supported in JIT yet
+            Inst::Echo { src, ty } => {
+                let ctx = self.context_ptr.expect("echo needs context (main only)");
+                let boxed_val = self.operand_to_boxed_with_vars(src, *ty, vreg_vars);
+
+                let func_ref = self.get_runtime_fn("rt_echo");
+                self.builder.ins().call(func_ref, &[ctx, boxed_val]);
             }
 
             // List operations - call runtime helpers
@@ -563,6 +589,17 @@ impl<'a> FunctionTranslator<'a> {
                 self.builder.def_var(vreg_vars[dst], result);
                 self.last_value = Some(result);
             }
+            Inst::ListLen { dst, list } => {
+                let ctx = self.context_ptr.expect("list ops need context (main only)");
+                let list_val = self.operand_to_value_with_vars(list, vreg_vars);
+
+                let func_ref = self.get_runtime_fn("rt_list_len");
+                let call = self.builder.ins().call(func_ref, &[ctx, list_val]);
+                let result = self.builder.inst_results(call)[0];
+
+                self.builder.def_var(vreg_vars[dst], result);
+                self.last_value = Some(result);
+            }
         }
     }
 
@@ -600,6 +637,17 @@ impl<'a> FunctionTranslator<'a> {
                 sig.params.push(AbiParam::new(types::I64)); // start
                 sig.params.push(AbiParam::new(types::I64)); // end
                 sig.returns.push(AbiParam::new(types::I64)); // new list value
+            }
+            "rt_list_len" => {
+                // fn(ctx: *mut, list: i64) -> i64
+                sig.params.push(AbiParam::new(ptr_type)); // ctx
+                sig.params.push(AbiParam::new(types::I64)); // list
+                sig.returns.push(AbiParam::new(types::I64)); // length
+            }
+            "rt_echo" => {
+                // fn(ctx: *mut, val: i64)
+                sig.params.push(AbiParam::new(ptr_type)); // ctx
+                sig.params.push(AbiParam::new(types::I64)); // NaN-boxed value
             }
             _ => panic!("unknown runtime function: {}", name),
         }
@@ -668,13 +716,74 @@ impl<'a> FunctionTranslator<'a> {
         }
     }
 
+    /// Convert operand to NaN-boxed representation using type info from MIR
+    fn operand_to_boxed_with_vars(
+        &mut self,
+        op: &Operand,
+        ty: ValueType,
+        vreg_vars: &HashMap<VReg, Variable>,
+    ) -> Value {
+        const QNAN_INT: i64 = 0xFFF9_0000_0000_0000_u64 as i64;
+        const QNAN_BOOL: i64 = 0xFFFA_0000_0000_0000_u64 as i64;
+        const PAYLOAD_MASK: i64 = 0x0000_FFFF_FFFF_FFFF_u64 as i64;
+
+        match op {
+            Operand::IntConst(n) => {
+                let boxed = QNAN_INT | (*n & PAYLOAD_MASK);
+                self.builder.ins().iconst(self.int_type, boxed)
+            }
+            Operand::FloatConst(f) => {
+                // Floats are stored as raw IEEE 754 bits
+                let bits = f.to_bits() as i64;
+                self.builder.ins().iconst(self.int_type, bits)
+            }
+            Operand::BoolConst(b) => {
+                let boxed = QNAN_BOOL | (*b as i64);
+                self.builder.ins().iconst(self.int_type, boxed)
+            }
+            Operand::VReg(v) => {
+                let raw_val = self.builder.use_var(vreg_vars[v]);
+                // Box based on known type
+                match ty {
+                    ValueType::Int => {
+                        let tag = self.builder.ins().iconst(self.int_type, QNAN_INT);
+                        let mask = self.builder.ins().iconst(self.int_type, PAYLOAD_MASK);
+                        let masked = self.builder.ins().band(raw_val, mask);
+                        self.builder.ins().bor(tag, masked)
+                    }
+                    ValueType::Float => {
+                        // Floats in VRegs are already stored as i64 bits, pass through
+                        raw_val
+                    }
+                    ValueType::Bool => {
+                        let tag = self.builder.ins().iconst(self.int_type, QNAN_BOOL);
+                        self.builder.ins().bor(tag, raw_val)
+                    }
+                    ValueType::Boxed => {
+                        // Already NaN-boxed (list, closure, etc.)
+                        raw_val
+                    }
+                }
+            }
+            Operand::StringConst(_) => {
+                panic!("string constants not yet supported in JIT echo")
+            }
+        }
+    }
+
     fn operand_to_float_with_vars(
         &mut self,
         op: &Operand,
         vreg_vars: &HashMap<VReg, Variable>,
     ) -> Value {
         match op {
-            Operand::VReg(v) => self.builder.use_var(vreg_vars[v]),
+            Operand::VReg(v) => {
+                // VRegs store floats as i64 bits, bitcast back to f64
+                let bits = self.builder.use_var(vreg_vars[v]);
+                self.builder
+                    .ins()
+                    .bitcast(types::F64, MemFlags::new(), bits)
+            }
             Operand::FloatConst(n) => self.builder.ins().f64const(*n),
             _ => panic!("expected float operand, got {:?}", op),
         }
@@ -688,7 +797,13 @@ impl<'a> FunctionTranslator<'a> {
         match op {
             Operand::VReg(v) => self.builder.use_var(vreg_vars[v]),
             Operand::IntConst(n) => self.builder.ins().iconst(self.int_type, *n),
-            Operand::FloatConst(n) => self.builder.ins().f64const(*n),
+            Operand::FloatConst(n) => {
+                // Store float as i64 bits (all vars are i64)
+                let f = self.builder.ins().f64const(*n);
+                self.builder
+                    .ins()
+                    .bitcast(self.int_type, MemFlags::new(), f)
+            }
             Operand::BoolConst(b) => self.builder.ins().iconst(self.int_type, *b as i64),
             Operand::StringConst(_) => {
                 panic!("string constants not yet supported in JIT")

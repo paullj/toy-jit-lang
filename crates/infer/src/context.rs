@@ -336,6 +336,64 @@ impl<'a> InferCtx<'a> {
                 self.infer_expr_idx(*body);
                 Type::Unit
             }
+            Expression::For {
+                binding,
+                iterable,
+                body,
+                ..
+            } => {
+                self.env.push_scope();
+
+                // Infer iterable type
+                let (iterable_ty, iterable_span) = self.infer_expr_idx(*iterable);
+
+                // Determine binding type based on iterable
+                let binding_ty = match &iterable_ty {
+                    // Range produces integers
+                    Type::Var(_) => {
+                        // Could be range (Int) or list (elem type)
+                        // Check if iterable is a Range expression
+                        let iterable_expr = &self.hir.expressions[*iterable];
+                        if matches!(iterable_expr, Expression::Range { .. }) {
+                            Type::Integer
+                        } else {
+                            // Assume list, binding is element type
+                            let elem_var = Type::Var(self.fresh_var());
+                            self.unify_or_error(
+                                &iterable_ty,
+                                &Type::List(Box::new(elem_var.clone())),
+                                iterable_span,
+                            );
+                            self.subst.apply(&elem_var)
+                        }
+                    }
+                    Type::List(elem) => (**elem).clone(),
+                    _ => {
+                        // For range expressions, binding is Int
+                        Type::Integer
+                    }
+                };
+
+                // Bind the loop variable
+                let binding_name = self.resolve(*binding).to_string();
+                self.env
+                    .insert(binding_name, Scheme::mono(binding_ty.clone()));
+
+                // Infer body
+                self.infer_expr_idx(*body);
+
+                self.env.pop_scope();
+                Type::Unit
+            }
+            Expression::Range { start, end } => {
+                // Both start and end must be integers
+                let (start_ty, start_span) = self.infer_expr_idx(*start);
+                let (end_ty, end_span) = self.infer_expr_idx(*end);
+                self.unify_or_error(&start_ty, &Type::Integer, start_span);
+                self.unify_or_error(&end_ty, &Type::Integer, end_span);
+                // Range produces integers (used in for loops)
+                Type::Integer
+            }
             Expression::Break { .. } => Type::Unit,
             Expression::Continue { .. } => Type::Unit,
             Expression::List { elements } => self.infer_list(elements),

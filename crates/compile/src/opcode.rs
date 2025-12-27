@@ -65,14 +65,15 @@ pub enum Opcode {
     // I/O (1)
     Echo = 38, // src:u8
 
-    // List operations (4)
+    // List operations (5)
     ListNew = 39,   // dst:u8, capacity:u8
     ListSet = 40,   // list:u8, index:u8, value:u8
     ListGet = 41,   // dst:u8, list:u8, index:u8
     ListSlice = 42, // dst:u8, list:u8, start:u8, end:u8
+    ListLen = 43,   // dst:u8, list:u8
 
     // End (1)
-    Halt = 43,
+    Halt = 44,
 }
 
 impl Opcode {

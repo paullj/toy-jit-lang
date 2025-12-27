@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use hir::{BlockItem, Definition, ExprIdx, Expression, Ident, InfixOp, Item, Literal, PrefixOp};
-use infer::InferenceResult;
+use infer::{InferenceResult, Type};
 
 use crate::ir::{
-    Block, BlockId, CapturedVar, FuncId, Function, Inst, LocalId, Module, Operand, VReg,
+    Block, BlockId, CapturedVar, FuncId, Function, Inst, LocalId, Module, Operand, VReg, ValueType,
 };
 
-pub fn lower(hir: &hir::LowerResult, _types: &InferenceResult) -> Module {
-    let mut ctx = LowerCtx::new(hir);
+pub fn lower(hir: &hir::LowerResult, types: &InferenceResult) -> Module {
+    let mut ctx = LowerCtx::new(hir, types);
     ctx.lower_module();
     ctx.finish()
 }
@@ -35,6 +35,7 @@ struct SavedContext {
 
 struct LowerCtx<'a> {
     hir: &'a hir::LowerResult,
+    types: &'a InferenceResult,
 
     // Current function being lowered
     current_func_id: FuncId,
@@ -62,9 +63,10 @@ struct LowerCtx<'a> {
 }
 
 impl<'a> LowerCtx<'a> {
-    fn new(hir: &'a hir::LowerResult) -> Self {
+    fn new(hir: &'a hir::LowerResult, types: &'a InferenceResult) -> Self {
         Self {
             hir,
+            types,
             current_func_id: FuncId(0),
             blocks: Vec::new(),
             current_block: Block::new(BlockId(0)),
@@ -83,6 +85,17 @@ impl<'a> LowerCtx<'a> {
     /// Resolve an Ident to its string representation
     fn resolve(&self, ident: Ident) -> &str {
         self.hir.resolve(ident)
+    }
+
+    /// Get ValueType for an expression index (for echo)
+    fn get_value_type(&self, expr_idx: ExprIdx) -> ValueType {
+        match self.types.expression_types.get(expr_idx) {
+            Some(Type::Integer) => ValueType::Int,
+            Some(Type::Float) => ValueType::Float,
+            Some(Type::Boolean) => ValueType::Bool,
+            // Lists, closures, strings, etc. are already NaN-boxed
+            _ => ValueType::Boxed,
+        }
     }
 
     fn save_context(&mut self) -> SavedContext {
@@ -544,8 +557,9 @@ impl<'a> LowerCtx<'a> {
                 Operand::IntConst(0)
             }
             Expression::Echo { value } => {
+                let ty = self.get_value_type(*value);
                 let operand = self.lower_expr_idx(*value);
-                self.emit(Inst::Echo { src: operand });
+                self.emit(Inst::Echo { src: operand, ty });
                 Operand::IntConst(0)
             }
             Expression::Loop { label, body } => self.lower_loop(label.as_ref(), *body),
@@ -554,6 +568,13 @@ impl<'a> LowerCtx<'a> {
                 label,
                 body,
             } => self.lower_while(label.as_ref(), *condition, *body),
+            Expression::For {
+                binding,
+                iterable,
+                label,
+                body,
+            } => self.lower_for(*binding, *iterable, label.as_ref(), *body),
+            Expression::Range { start, end } => self.lower_range(*start, *end),
             Expression::Break { label } => {
                 let label_str = label.map(|l| self.resolve(l).to_string());
                 if let Some(ctx) = self.find_loop(label_str.as_deref()) {
@@ -785,8 +806,9 @@ impl<'a> LowerCtx<'a> {
                     self.emit(Inst::Return { value: operand });
                 }
                 BlockItem::Echo { value } => {
+                    let ty = self.get_value_type(*value);
                     let operand = self.lower_expr_idx(*value);
-                    self.emit(Inst::Echo { src: operand });
+                    self.emit(Inst::Echo { src: operand, ty });
                 }
                 BlockItem::Break { label } => {
                     let label_str = label.map(|l| self.resolve(l).to_string());
@@ -918,6 +940,291 @@ impl<'a> LowerCtx<'a> {
 
         // Exit block
         self.switch_to_block(exit_bb);
+        Operand::IntConst(0)
+    }
+
+    /// Lower for-loop, desugaring to while-loop.
+    /// For range iteration: `for i in start..end { body }` -> counter loop
+    /// For list iteration: `for item in list { body }` -> indexed loop
+    fn lower_for(
+        &mut self,
+        binding: Ident,
+        iterable: ExprIdx,
+        label: Option<&Ident>,
+        body: ExprIdx,
+    ) -> Operand {
+        // Check if iterable is a Range expression
+        let iterable_expr = self.hir.expressions[iterable].clone();
+        if let Expression::Range { start, end } = iterable_expr {
+            return self.lower_for_range(binding, start, end, label, body);
+        }
+
+        // List iteration: desugar to indexed while loop
+        self.lower_for_list(binding, iterable, label, body)
+    }
+
+    /// Lower range-based for: `for i in start..end { body }`
+    /// Desugars to:
+    /// ```text
+    /// i = start
+    /// __end = end
+    /// while i < __end {
+    ///     body
+    ///     i = i + 1
+    /// }
+    /// ```
+    fn lower_for_range(
+        &mut self,
+        binding: Ident,
+        start: ExprIdx,
+        end: ExprIdx,
+        label: Option<&Ident>,
+        body: ExprIdx,
+    ) -> Operand {
+        let cond_bb = self.create_block();
+        let loop_bb = self.create_block();
+        let incr_bb = self.create_block();
+        let exit_bb = self.create_block();
+
+        let label_str = label.map(|l| self.resolve(*l).to_string());
+
+        // binding = start
+        let binding_str = self.resolve(binding).to_string();
+        let start_val = self.lower_expr_idx(start);
+        let binding_local = self.alloc_local(&binding_str);
+        self.emit(Inst::StoreLocal {
+            local: binding_local,
+            src: start_val,
+        });
+
+        // __end = end
+        let end_val = self.lower_expr_idx(end);
+        let end_local = self.alloc_local("__end");
+        self.emit(Inst::StoreLocal {
+            local: end_local,
+            src: end_val,
+        });
+
+        // Push loop context (continue -> incr_bb)
+        self.loop_stack.push(LoopContext {
+            label: label_str,
+            continue_bb: incr_bb,
+            break_bb: exit_bb,
+        });
+
+        // Jump to condition
+        self.emit(Inst::Jump { target: cond_bb });
+
+        // cond_bb: binding < __end
+        self.switch_to_block(cond_bb);
+        let idx = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: idx,
+            local: binding_local,
+        });
+        let len = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: len,
+            local: end_local,
+        });
+        let cond = self.fresh_vreg();
+        self.emit(Inst::LtInt {
+            dst: cond,
+            lhs: Operand::VReg(idx),
+            rhs: Operand::VReg(len),
+        });
+        self.emit(Inst::Branch {
+            cond: Operand::VReg(cond),
+            then_bb: loop_bb,
+            else_bb: exit_bb,
+        });
+
+        // loop_bb: body
+        self.switch_to_block(loop_bb);
+        self.lower_expr_idx(body);
+        self.emit(Inst::Jump { target: incr_bb });
+
+        // incr_bb: binding = binding + 1
+        self.switch_to_block(incr_bb);
+        let idx2 = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: idx2,
+            local: binding_local,
+        });
+        let next_idx = self.fresh_vreg();
+        self.emit(Inst::AddInt {
+            dst: next_idx,
+            lhs: Operand::VReg(idx2),
+            rhs: Operand::IntConst(1),
+        });
+        self.emit(Inst::StoreLocal {
+            local: binding_local,
+            src: Operand::VReg(next_idx),
+        });
+        self.emit(Inst::Jump { target: cond_bb });
+
+        // Pop loop context
+        self.loop_stack.pop();
+
+        // exit_bb
+        self.switch_to_block(exit_bb);
+        Operand::IntConst(0)
+    }
+
+    /// Lower list-based for: `for item in list { body }`
+    /// Desugars to:
+    /// ```text
+    /// __idx = 0
+    /// __list = list
+    /// __len = len(__list)
+    /// while __idx < __len {
+    ///     item = __list[__idx]
+    ///     body
+    ///     __idx = __idx + 1
+    /// }
+    /// ```
+    fn lower_for_list(
+        &mut self,
+        binding: Ident,
+        iterable: ExprIdx,
+        label: Option<&Ident>,
+        body: ExprIdx,
+    ) -> Operand {
+        let cond_bb = self.create_block();
+        let loop_bb = self.create_block();
+        let incr_bb = self.create_block();
+        let exit_bb = self.create_block();
+
+        let label_str = label.map(|l| self.resolve(*l).to_string());
+
+        // __idx = 0
+        let idx_local = self.alloc_local("__idx");
+        self.emit(Inst::StoreLocal {
+            local: idx_local,
+            src: Operand::IntConst(0),
+        });
+
+        // __list = iterable
+        let list_val = self.lower_expr_idx(iterable);
+        let list_local = self.alloc_local("__list");
+        self.emit(Inst::StoreLocal {
+            local: list_local,
+            src: list_val,
+        });
+
+        // __len = len(__list)
+        let len_dst = self.fresh_vreg();
+        let list_for_len = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: list_for_len,
+            local: list_local,
+        });
+        self.emit(Inst::ListLen {
+            dst: len_dst,
+            list: Operand::VReg(list_for_len),
+        });
+        let len_local = self.alloc_local("__len");
+        self.emit(Inst::StoreLocal {
+            local: len_local,
+            src: Operand::VReg(len_dst),
+        });
+
+        // Allocate binding local
+        let binding_str = self.resolve(binding).to_string();
+        let binding_local = self.alloc_local(&binding_str);
+
+        // Push loop context (continue -> incr_bb)
+        self.loop_stack.push(LoopContext {
+            label: label_str,
+            continue_bb: incr_bb,
+            break_bb: exit_bb,
+        });
+
+        // Jump to condition
+        self.emit(Inst::Jump { target: cond_bb });
+
+        // cond_bb: __idx < __len
+        self.switch_to_block(cond_bb);
+        let idx = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: idx,
+            local: idx_local,
+        });
+        let len = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: len,
+            local: len_local,
+        });
+        let cond = self.fresh_vreg();
+        self.emit(Inst::LtInt {
+            dst: cond,
+            lhs: Operand::VReg(idx),
+            rhs: Operand::VReg(len),
+        });
+        self.emit(Inst::Branch {
+            cond: Operand::VReg(cond),
+            then_bb: loop_bb,
+            else_bb: exit_bb,
+        });
+
+        // loop_bb: binding = __list[__idx]; body
+        self.switch_to_block(loop_bb);
+        let list_v = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: list_v,
+            local: list_local,
+        });
+        let idx_v = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: idx_v,
+            local: idx_local,
+        });
+        let elem = self.fresh_vreg();
+        self.emit(Inst::ListGet {
+            dst: elem,
+            list: Operand::VReg(list_v),
+            index: Operand::VReg(idx_v),
+        });
+        self.emit(Inst::StoreLocal {
+            local: binding_local,
+            src: Operand::VReg(elem),
+        });
+
+        self.lower_expr_idx(body);
+        self.emit(Inst::Jump { target: incr_bb });
+
+        // incr_bb: __idx = __idx + 1
+        self.switch_to_block(incr_bb);
+        let idx2 = self.fresh_vreg();
+        self.emit(Inst::LoadLocal {
+            dst: idx2,
+            local: idx_local,
+        });
+        let next_idx = self.fresh_vreg();
+        self.emit(Inst::AddInt {
+            dst: next_idx,
+            lhs: Operand::VReg(idx2),
+            rhs: Operand::IntConst(1),
+        });
+        self.emit(Inst::StoreLocal {
+            local: idx_local,
+            src: Operand::VReg(next_idx),
+        });
+        self.emit(Inst::Jump { target: cond_bb });
+
+        // Pop loop context
+        self.loop_stack.pop();
+
+        // exit_bb
+        self.switch_to_block(exit_bb);
+        Operand::IntConst(0)
+    }
+
+    /// Lower standalone range expression (not in for-loop context).
+    /// For now, just returns 0 since ranges are primarily used in for-loops.
+    fn lower_range(&mut self, _start: ExprIdx, _end: ExprIdx) -> Operand {
+        // Standalone range expressions are not supported outside for loops
+        // Could implement as a list [start, start+1, ..., end-1] but that's inefficient
         Operand::IntConst(0)
     }
 

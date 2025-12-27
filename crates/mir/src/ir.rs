@@ -47,6 +47,16 @@ pub struct CapturedVar {
     pub outer_local: LocalId,
 }
 
+/// Value type tag for echo (used by JIT for proper NaN-boxing)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueType {
+    Int,
+    Float,
+    Bool,
+    /// Already NaN-boxed (list, closure, string, etc.)
+    Boxed,
+}
+
 /// Operand: either a virtual register or an immediate constant
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
@@ -253,6 +263,7 @@ pub enum Inst {
     /// Print value to stdout
     Echo {
         src: Operand,
+        ty: ValueType,
     },
 
     // List operations
@@ -279,6 +290,11 @@ pub enum Inst {
         list: Operand,
         start: Option<Operand>,
         end: Option<Operand>,
+    },
+    /// Get length of list: dst = len(list)
+    ListLen {
+        dst: VReg,
+        list: Operand,
     },
 }
 
