@@ -296,6 +296,18 @@ pub enum Inst {
         dst: VReg,
         list: Operand,
     },
+    // Tuple operations
+    /// Create a new tuple with given elements
+    TupleNew {
+        dst: VReg,
+        elements: Vec<Operand>,
+    },
+    /// Get element from tuple by static index: dst = tuple.index
+    TupleGet {
+        dst: VReg,
+        tuple: Operand,
+        index: u32,
+    },
 }
 
 impl Inst {

@@ -121,6 +121,17 @@ impl fmt::Display for Inst {
             Inst::ListLen { dst, list } => {
                 write!(f, "{} = list_len {}", dst, list)
             }
+            // Tuple operations
+            Inst::TupleNew { dst, elements } => {
+                write!(f, "{} = tuple_new", dst)?;
+                for elem in elements {
+                    write!(f, " {}", elem)?;
+                }
+                Ok(())
+            }
+            Inst::TupleGet { dst, tuple, index } => {
+                write!(f, "{} = tuple_get {} {}", dst, tuple, index)
+            }
         }
     }
 }

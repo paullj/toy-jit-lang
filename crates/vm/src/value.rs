@@ -17,22 +17,46 @@ const TAG_MASK: u64 = 0x0007_0000_0000_0000; // 3 bits for type tag (bits 48-50)
 const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF; // 48-bit payload
 
 // Tags (bits 48-50) - OR'd with QNAN
+// New layout with payload sub-tags for heap types:
+//   001 = Integer   (full 48-bit signed payload)
+//   010 = Boolean   (1-bit payload)
+//   011 = Unit      (no payload)
+//   100 = String    (1-bit subtype + 47-bit payload)
+//   101 = Closure   (48-bit heap index)
+//   110 = Aggregate (2-bit subtype + 46-bit heap index)
+//   111 = Object    (reserved for Struct/Enum)
 const TAG_INT: u64 = 0x0001_0000_0000_0000; // 001
 const TAG_BOOL: u64 = 0x0002_0000_0000_0000; // 010
 const TAG_UNIT: u64 = 0x0003_0000_0000_0000; // 011
-const TAG_INTERNED: u64 = 0x0004_0000_0000_0000; // 100
-const TAG_DYNSTR: u64 = 0x0005_0000_0000_0000; // 101
-const TAG_CLOSURE: u64 = 0x0006_0000_0000_0000; // 110
-const TAG_LIST: u64 = 0x0007_0000_0000_0000; // 111
+const TAG_STRING: u64 = 0x0004_0000_0000_0000; // 100
+const TAG_CLOSURE: u64 = 0x0005_0000_0000_0000; // 101
+const TAG_AGGREGATE: u64 = 0x0006_0000_0000_0000; // 110
+#[allow(dead_code)]
+const TAG_OBJECT: u64 = 0x0007_0000_0000_0000; // 111 (reserved)
+
+// String subtypes (bit 47 of payload)
+const STRING_INTERNED: u64 = 0x0000_0000_0000_0000; // bit 47 = 0
+const STRING_DYNAMIC: u64 = 0x0000_8000_0000_0000; // bit 47 = 1
+const STRING_SUBTYPE_MASK: u64 = 0x0000_8000_0000_0000;
+const STRING_PAYLOAD_MASK: u64 = 0x0000_7FFF_FFFF_FFFF; // 47 bits
+
+// Aggregate subtypes (bits 46-47 of payload)
+const AGG_LIST: u64 = 0x0000_0000_0000_0000; // bits 46-47 = 00
+const AGG_TUPLE: u64 = 0x0000_4000_0000_0000; // bits 46-47 = 01
+const AGG_SUBTYPE_MASK: u64 = 0x0000_C000_0000_0000;
+const AGG_PAYLOAD_MASK: u64 = 0x0000_3FFF_FFFF_FFFF; // 46 bits
 
 // Combined patterns for fast checking
 const QNAN_INT: u64 = QNAN | TAG_INT;
 const QNAN_BOOL: u64 = QNAN | TAG_BOOL;
 const QNAN_UNIT: u64 = QNAN | TAG_UNIT;
-const QNAN_INTERNED: u64 = QNAN | TAG_INTERNED;
-const QNAN_DYNSTR: u64 = QNAN | TAG_DYNSTR;
+const QNAN_STRING: u64 = QNAN | TAG_STRING;
+const QNAN_INTERNED: u64 = QNAN | TAG_STRING | STRING_INTERNED;
+const QNAN_DYNSTR: u64 = QNAN | TAG_STRING | STRING_DYNAMIC;
 const QNAN_CLOSURE: u64 = QNAN | TAG_CLOSURE;
-const QNAN_LIST: u64 = QNAN | TAG_LIST;
+const QNAN_AGGREGATE: u64 = QNAN | TAG_AGGREGATE;
+const QNAN_LIST: u64 = QNAN | TAG_AGGREGATE | AGG_LIST;
+const QNAN_TUPLE: u64 = QNAN | TAG_AGGREGATE | AGG_TUPLE;
 
 // Mask for type checking: QNAN + TAG
 const TYPE_MASK: u64 = QNAN | TAG_MASK;
@@ -44,10 +68,11 @@ const TYPE_MASK: u64 = QNAN | TAG_MASK;
 /// - Int: QNAN | TAG_INT | 48-bit signed payload
 /// - Bool: QNAN | TAG_BOOL | 0 or 1
 /// - Unit: QNAN | TAG_UNIT
-/// - InternedString: QNAN | TAG_INTERNED | spur index
-/// - DynamicString: QNAN | TAG_DYNSTR | heap index
-/// - Closure: QNAN | TAG_CLOSURE | heap index
-/// - List: QNAN | TAG_LIST | heap index
+/// - InternedString: QNAN | TAG_STRING | STRING_INTERNED | 47-bit spur index
+/// - DynamicString: QNAN | TAG_STRING | STRING_DYNAMIC | 47-bit heap index
+/// - Closure: QNAN | TAG_CLOSURE | 48-bit heap index
+/// - List: QNAN | TAG_AGGREGATE | AGG_LIST | 46-bit heap index
+/// - Tuple: QNAN | TAG_AGGREGATE | AGG_TUPLE | 46-bit heap index
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Value(u64);
@@ -96,6 +121,11 @@ impl Value {
         Self(QNAN_LIST | (idx as u64))
     }
 
+    #[inline(always)]
+    pub const fn tuple(idx: u32) -> Self {
+        Self(QNAN_TUPLE | (idx as u64))
+    }
+
     /// Get raw bits for passing to/from JIT (NaN-boxed representation).
     #[inline(always)]
     pub const fn to_bits(self) -> i64 {
@@ -132,16 +162,22 @@ impl Value {
         (self.0 & TYPE_MASK) == QNAN_UNIT
     }
 
+    /// Check if this is any string type
+    #[inline(always)]
+    pub fn is_string(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_STRING
+    }
+
     /// Check if this is an interned string
     #[inline(always)]
     pub fn is_interned_string(&self) -> bool {
-        (self.0 & TYPE_MASK) == QNAN_INTERNED
+        self.is_string() && (self.0 & STRING_SUBTYPE_MASK) == STRING_INTERNED
     }
 
     /// Check if this is a dynamic string
     #[inline(always)]
     pub fn is_dynamic_string(&self) -> bool {
-        (self.0 & TYPE_MASK) == QNAN_DYNSTR
+        self.is_string() && (self.0 & STRING_SUBTYPE_MASK) == STRING_DYNAMIC
     }
 
     /// Check if this is a closure
@@ -150,16 +186,22 @@ impl Value {
         (self.0 & TYPE_MASK) == QNAN_CLOSURE
     }
 
+    /// Check if this is any aggregate type (list, tuple)
+    #[inline(always)]
+    pub fn is_aggregate(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_AGGREGATE
+    }
+
     /// Check if this is a list
     #[inline(always)]
     pub fn is_list(&self) -> bool {
-        (self.0 & TYPE_MASK) == QNAN_LIST
+        self.is_aggregate() && (self.0 & AGG_SUBTYPE_MASK) == AGG_LIST
     }
 
-    /// Check if this is any string type
+    /// Check if this is a tuple
     #[inline(always)]
-    pub fn is_string(&self) -> bool {
-        self.is_interned_string() || self.is_dynamic_string()
+    pub fn is_tuple(&self) -> bool {
+        self.is_aggregate() && (self.0 & AGG_SUBTYPE_MASK) == AGG_TUPLE
     }
 
     #[inline(always)]
@@ -221,7 +263,7 @@ impl Value {
     #[inline(always)]
     pub fn as_interned_string(&self) -> Option<Spur> {
         if self.is_interned_string() {
-            let payload = (self.0 & PAYLOAD_MASK) as usize;
+            let payload = (self.0 & STRING_PAYLOAD_MASK) as usize;
             Spur::try_from_usize(payload)
         } else {
             None
@@ -231,7 +273,7 @@ impl Value {
     #[inline(always)]
     pub fn as_dynamic_string_idx(&self) -> Option<u32> {
         if self.is_dynamic_string() {
-            Some((self.0 & PAYLOAD_MASK) as u32)
+            Some((self.0 & STRING_PAYLOAD_MASK) as u32)
         } else {
             None
         }
@@ -256,7 +298,7 @@ impl Value {
     #[inline(always)]
     pub fn as_list_idx(&self) -> Option<u32> {
         if self.is_list() {
-            Some((self.0 & PAYLOAD_MASK) as u32)
+            Some((self.0 & AGG_PAYLOAD_MASK) as u32)
         } else {
             None
         }
@@ -266,7 +308,23 @@ impl Value {
     #[inline(always)]
     pub fn as_list_idx_unchecked(&self) -> u32 {
         debug_assert!(self.is_list(), "expected List");
-        (self.0 & PAYLOAD_MASK) as u32
+        (self.0 & AGG_PAYLOAD_MASK) as u32
+    }
+
+    #[inline(always)]
+    pub fn as_tuple_idx(&self) -> Option<u32> {
+        if self.is_tuple() {
+            Some((self.0 & AGG_PAYLOAD_MASK) as u32)
+        } else {
+            None
+        }
+    }
+
+    /// Get tuple index. Panics in debug if wrong type.
+    #[inline(always)]
+    pub fn as_tuple_idx_unchecked(&self) -> u32 {
+        debug_assert!(self.is_tuple(), "expected Tuple");
+        (self.0 & AGG_PAYLOAD_MASK) as u32
     }
 
     pub fn type_name(&self) -> &'static str {
@@ -277,9 +335,13 @@ impl Value {
                 QNAN_INT => "Int",
                 QNAN_BOOL => "Bool",
                 QNAN_UNIT => "Unit",
-                QNAN_INTERNED | QNAN_DYNSTR => "String",
+                QNAN_STRING => "String",
                 QNAN_CLOSURE => "Closure",
-                QNAN_LIST => "List",
+                QNAN_AGGREGATE => match self.0 & AGG_SUBTYPE_MASK {
+                    AGG_LIST => "List",
+                    AGG_TUPLE => "Tuple",
+                    _ => "Unknown",
+                },
                 _ => "Unknown",
             }
         }
@@ -296,24 +358,38 @@ impl Value {
             QNAN_UNIT => "()".to_string(),
             QNAN_BOOL => format!("{}", (self.0 & 1) != 0),
             QNAN_INT => format!("{}", self.extract_signed_payload()),
-            QNAN_INTERNED => {
-                panic!("cannot display interned string without interner - should be materialized")
-            }
-            QNAN_DYNSTR => {
-                let idx = (self.0 & PAYLOAD_MASK) as u32;
-                heap.get_string(idx).to_string()
+            QNAN_STRING => {
+                if self.is_interned_string() {
+                    panic!(
+                        "cannot display interned string without interner - should be materialized"
+                    )
+                } else {
+                    let idx = (self.0 & STRING_PAYLOAD_MASK) as u32;
+                    heap.get_string(idx).to_string()
+                }
             }
             QNAN_CLOSURE => {
                 let idx = (self.0 & PAYLOAD_MASK) as u32;
                 let closure = heap.get_closure(idx);
                 format!("<closure fn{}>", closure.func_idx)
             }
-            QNAN_LIST => {
-                let idx = (self.0 & PAYLOAD_MASK) as u32;
-                let list = heap.get_list(idx);
-                let elements: Vec<String> = list.elements.iter().map(|v| v.display(heap)).collect();
-                format!("[{}]", elements.join(", "))
-            }
+            QNAN_AGGREGATE => match self.0 & AGG_SUBTYPE_MASK {
+                AGG_LIST => {
+                    let idx = (self.0 & AGG_PAYLOAD_MASK) as u32;
+                    let list = heap.get_list(idx);
+                    let elements: Vec<String> =
+                        list.elements.iter().map(|v| v.display(heap)).collect();
+                    format!("[{}]", elements.join(", "))
+                }
+                AGG_TUPLE => {
+                    let idx = (self.0 & AGG_PAYLOAD_MASK) as u32;
+                    let tuple = heap.get_tuple(idx);
+                    let elements: Vec<String> =
+                        tuple.elements.iter().map(|v| v.display(heap)).collect();
+                    format!("({})", elements.join(", "))
+                }
+                _ => "<unknown>".to_string(),
+            },
             _ => "<unknown>".to_string(),
         }
     }
@@ -328,30 +404,44 @@ impl Value {
             QNAN_UNIT => "()".to_string(),
             QNAN_BOOL => format!("{}", (self.0 & 1) != 0),
             QNAN_INT => format!("{}", self.extract_signed_payload()),
-            QNAN_INTERNED => {
-                let payload = (self.0 & PAYLOAD_MASK) as usize;
-                let spur = Spur::try_from_usize(payload).expect("invalid interned string spur");
-                interner.resolve(&spur).to_string()
-            }
-            QNAN_DYNSTR => {
-                let idx = (self.0 & PAYLOAD_MASK) as u32;
-                heap.get_string(idx).to_string()
+            QNAN_STRING => {
+                if self.is_interned_string() {
+                    let payload = (self.0 & STRING_PAYLOAD_MASK) as usize;
+                    let spur = Spur::try_from_usize(payload).expect("invalid interned string spur");
+                    interner.resolve(&spur).to_string()
+                } else {
+                    let idx = (self.0 & STRING_PAYLOAD_MASK) as u32;
+                    heap.get_string(idx).to_string()
+                }
             }
             QNAN_CLOSURE => {
                 let idx = (self.0 & PAYLOAD_MASK) as u32;
                 let closure = heap.get_closure(idx);
                 format!("<closure fn{}>", closure.func_idx)
             }
-            QNAN_LIST => {
-                let idx = (self.0 & PAYLOAD_MASK) as u32;
-                let list = heap.get_list(idx);
-                let elements: Vec<String> = list
-                    .elements
-                    .iter()
-                    .map(|v| v.display_with_interner(heap, interner))
-                    .collect();
-                format!("[{}]", elements.join(", "))
-            }
+            QNAN_AGGREGATE => match self.0 & AGG_SUBTYPE_MASK {
+                AGG_LIST => {
+                    let idx = (self.0 & AGG_PAYLOAD_MASK) as u32;
+                    let list = heap.get_list(idx);
+                    let elements: Vec<String> = list
+                        .elements
+                        .iter()
+                        .map(|v| v.display_with_interner(heap, interner))
+                        .collect();
+                    format!("[{}]", elements.join(", "))
+                }
+                AGG_TUPLE => {
+                    let idx = (self.0 & AGG_PAYLOAD_MASK) as u32;
+                    let tuple = heap.get_tuple(idx);
+                    let elements: Vec<String> = tuple
+                        .elements
+                        .iter()
+                        .map(|v| v.display_with_interner(heap, interner))
+                        .collect();
+                    format!("({})", elements.join(", "))
+                }
+                _ => "<unknown>".to_string(),
+            },
             _ => "<unknown>".to_string(),
         }
     }
@@ -380,9 +470,7 @@ impl Value {
         }
 
         // String comparison (any combination of interned/dynamic)
-        if (self_type == QNAN_INTERNED || self_type == QNAN_DYNSTR)
-            && (other_type == QNAN_INTERNED || other_type == QNAN_DYNSTR)
-        {
+        if self_type == QNAN_STRING && other_type == QNAN_STRING {
             let a = self.get_str(heap, interner);
             let b = other.get_str(heap, interner);
             return a == b;
@@ -408,21 +496,46 @@ impl Value {
             return true;
         }
 
-        // List comparison
-        if self_type == QNAN_LIST && other_type == QNAN_LIST {
-            let a_idx = (self.0 & PAYLOAD_MASK) as u32;
-            let b_idx = (other.0 & PAYLOAD_MASK) as u32;
-            let a = heap.get_list(a_idx);
-            let b = heap.get_list(b_idx);
-            if a.elements.len() != b.elements.len() {
+        // Aggregate comparison (list, tuple)
+        if self_type == QNAN_AGGREGATE && other_type == QNAN_AGGREGATE {
+            let self_subtype = self.0 & AGG_SUBTYPE_MASK;
+            let other_subtype = other.0 & AGG_SUBTYPE_MASK;
+            if self_subtype != other_subtype {
                 return false;
             }
-            for (ea, eb) in a.elements.iter().zip(b.elements.iter()) {
-                if !ea.eq(eb, heap, interner) {
-                    return false;
+            match self_subtype {
+                AGG_LIST => {
+                    let a_idx = (self.0 & AGG_PAYLOAD_MASK) as u32;
+                    let b_idx = (other.0 & AGG_PAYLOAD_MASK) as u32;
+                    let a = heap.get_list(a_idx);
+                    let b = heap.get_list(b_idx);
+                    if a.elements.len() != b.elements.len() {
+                        return false;
+                    }
+                    for (ea, eb) in a.elements.iter().zip(b.elements.iter()) {
+                        if !ea.eq(eb, heap, interner) {
+                            return false;
+                        }
+                    }
+                    return true;
                 }
+                AGG_TUPLE => {
+                    let a_idx = (self.0 & AGG_PAYLOAD_MASK) as u32;
+                    let b_idx = (other.0 & AGG_PAYLOAD_MASK) as u32;
+                    let a = heap.get_tuple(a_idx);
+                    let b = heap.get_tuple(b_idx);
+                    if a.elements.len() != b.elements.len() {
+                        return false;
+                    }
+                    for (ea, eb) in a.elements.iter().zip(b.elements.iter()) {
+                        if !ea.eq(eb, heap, interner) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+                _ => return false,
             }
-            return true;
         }
 
         false
@@ -430,17 +543,14 @@ impl Value {
 
     /// Get string content (works for both interned and dynamic)
     fn get_str<'a>(&self, heap: &'a Heap, interner: &'a Rodeo) -> &'a str {
-        match self.0 & TYPE_MASK {
-            QNAN_INTERNED => {
-                let payload = (self.0 & PAYLOAD_MASK) as usize;
-                let spur = Spur::try_from_usize(payload).expect("invalid interned string spur");
-                interner.resolve(&spur)
-            }
-            QNAN_DYNSTR => {
-                let idx = (self.0 & PAYLOAD_MASK) as u32;
-                heap.get_string(idx)
-            }
-            _ => panic!("not a string"),
+        debug_assert!(self.is_string(), "expected String");
+        if self.is_interned_string() {
+            let payload = (self.0 & STRING_PAYLOAD_MASK) as usize;
+            let spur = Spur::try_from_usize(payload).expect("invalid interned string spur");
+            interner.resolve(&spur)
+        } else {
+            let idx = (self.0 & STRING_PAYLOAD_MASK) as u32;
+            heap.get_string(idx)
         }
     }
 }
@@ -455,10 +565,19 @@ impl std::fmt::Debug for Value {
             QNAN_UNIT => write!(f, "Unit"),
             QNAN_BOOL => write!(f, "Bool({})", (self.0 & 1) != 0),
             QNAN_INT => write!(f, "Int({})", self.extract_signed_payload()),
-            QNAN_INTERNED => write!(f, "InternedString(spur={})", self.0 & PAYLOAD_MASK),
-            QNAN_DYNSTR => write!(f, "DynamicString(idx={})", self.0 & PAYLOAD_MASK),
+            QNAN_STRING => {
+                if self.is_interned_string() {
+                    write!(f, "InternedString(spur={})", self.0 & STRING_PAYLOAD_MASK)
+                } else {
+                    write!(f, "DynamicString(idx={})", self.0 & STRING_PAYLOAD_MASK)
+                }
+            }
             QNAN_CLOSURE => write!(f, "Closure(idx={})", self.0 & PAYLOAD_MASK),
-            QNAN_LIST => write!(f, "List(idx={})", self.0 & PAYLOAD_MASK),
+            QNAN_AGGREGATE => match self.0 & AGG_SUBTYPE_MASK {
+                AGG_LIST => write!(f, "List(idx={})", self.0 & AGG_PAYLOAD_MASK),
+                AGG_TUPLE => write!(f, "Tuple(idx={})", self.0 & AGG_PAYLOAD_MASK),
+                _ => write!(f, "Aggregate(unknown=0x{:016x})", self.0),
+            },
             _ => write!(f, "Unknown(0x{:016x})", self.0),
         }
     }
@@ -475,6 +594,11 @@ pub struct ListData {
     pub elements: Vec<Value>,
 }
 
+/// Tuple data stored in heap pool.
+pub struct TupleData {
+    pub elements: Box<[Value]>, // fixed after creation
+}
+
 /// GC statistics for debugging/profiling.
 #[derive(Debug, Clone, Default)]
 pub struct GcStats {
@@ -483,24 +607,28 @@ pub struct GcStats {
     pub strings_freed: u64,
     pub closures_freed: u64,
     pub lists_freed: u64,
+    pub tuples_freed: u64,
 }
 
-/// Heap for dynamic strings, closures, and lists with mark-and-sweep GC.
+/// Heap for dynamic strings, closures, lists, and tuples with mark-and-sweep GC.
 pub struct Heap {
     // Object storage (None = freed slot)
     strings: Vec<Option<String>>,
     closures: Vec<Option<ClosureData>>,
     lists: Vec<Option<ListData>>,
+    tuples: Vec<Option<TupleData>>,
 
     // Free lists for slot reuse
     free_strings: Vec<u32>,
     free_closures: Vec<u32>,
     free_lists: Vec<u32>,
+    free_tuples: Vec<u32>,
 
     // Mark bits (separate for cache efficiency)
     string_marks: Vec<bool>,
     closure_marks: Vec<bool>,
     list_marks: Vec<bool>,
+    tuple_marks: Vec<bool>,
 
     // GC state
     bytes_allocated: usize,
@@ -519,12 +647,15 @@ impl Heap {
             strings: Vec::new(),
             closures: Vec::new(),
             lists: Vec::new(),
+            tuples: Vec::new(),
             free_strings: Vec::new(),
             free_closures: Vec::new(),
             free_lists: Vec::new(),
+            free_tuples: Vec::new(),
             string_marks: Vec::new(),
             closure_marks: Vec::new(),
             list_marks: Vec::new(),
+            tuple_marks: Vec::new(),
             bytes_allocated: 0,
             gc_threshold: INITIAL_GC_THRESHOLD,
             stats: GcStats::default(),
@@ -622,6 +753,35 @@ impl Heap {
             .expect("accessing freed list")
     }
 
+    /// Allocate a tuple on the heap, returns index.
+    pub fn alloc_tuple(&mut self, elements: Vec<Value>) -> u32 {
+        // Estimate tuple size: Box overhead (16) + elements (8 * len with NaN boxing)
+        let size = 16 + 8 * elements.len();
+        let data = TupleData {
+            elements: elements.into_boxed_slice(),
+        };
+
+        let idx = if let Some(free_idx) = self.free_tuples.pop() {
+            self.tuples[free_idx as usize] = Some(data);
+            self.tuple_marks[free_idx as usize] = false;
+            free_idx
+        } else {
+            let idx = self.tuples.len() as u32;
+            self.tuples.push(Some(data));
+            self.tuple_marks.push(false);
+            idx
+        };
+        self.bytes_allocated += size;
+        idx
+    }
+
+    /// Get tuple by index. Panics if freed.
+    pub fn get_tuple(&self, idx: u32) -> &TupleData {
+        self.tuples[idx as usize]
+            .as_ref()
+            .expect("accessing freed tuple")
+    }
+
     /// Check if GC should run based on allocation threshold.
     pub fn should_gc(&self) -> bool {
         self.bytes_allocated > self.gc_threshold
@@ -637,7 +797,7 @@ impl Heap {
         self.bytes_allocated
     }
 
-    /// Mark a value as reachable. Returns handles to trace if it's a closure or list.
+    /// Mark a value as reachable. Returns handles to trace if it's a closure, list, or tuple.
     fn mark_value(&mut self, value: Value) -> Option<Vec<Value>> {
         if value.is_dynamic_string() {
             let idx = value.as_dynamic_string_idx().unwrap() as usize;
@@ -665,6 +825,16 @@ impl Heap {
                 }
             }
             None
+        } else if value.is_tuple() {
+            let idx = value.as_tuple_idx().unwrap() as usize;
+            if idx < self.tuple_marks.len() && !self.tuple_marks[idx] {
+                self.tuple_marks[idx] = true;
+                // Return elements to trace
+                if let Some(tuple) = &self.tuples[idx] {
+                    return Some(tuple.elements.to_vec());
+                }
+            }
+            None
         } else {
             None // Non-heap types
         }
@@ -687,6 +857,7 @@ impl Heap {
         let mut strings_freed = 0u64;
         let mut closures_freed = 0u64;
         let mut lists_freed = 0u64;
+        let mut tuples_freed = 0u64;
 
         // Sweep strings
         for (i, marked) in self.string_marks.iter_mut().enumerate() {
@@ -720,11 +891,23 @@ impl Heap {
             *marked = false;
         }
 
+        // Sweep tuples
+        for (i, marked) in self.tuple_marks.iter_mut().enumerate() {
+            if !*marked && let Some(tuple) = self.tuples[i].take() {
+                let size = 16 + 8 * tuple.elements.len();
+                bytes_freed += size as u64;
+                tuples_freed += 1;
+                self.free_tuples.push(i as u32);
+            }
+            *marked = false;
+        }
+
         self.bytes_allocated = self.bytes_allocated.saturating_sub(bytes_freed as usize);
         self.stats.bytes_freed += bytes_freed;
         self.stats.strings_freed += strings_freed;
         self.stats.closures_freed += closures_freed;
         self.stats.lists_freed += lists_freed;
+        self.stats.tuples_freed += tuples_freed;
     }
 
     /// Run a full GC cycle with the given roots.
@@ -1009,5 +1192,88 @@ mod tests {
         assert_eq!(heap.get_string(str_idx), "in list");
         assert_eq!(heap.stats().strings_freed, 0);
         assert_eq!(heap.stats().lists_freed, 0);
+    }
+
+    #[test]
+    fn test_tuple_basic() {
+        let mut heap = Heap::new();
+
+        let idx = heap.alloc_tuple(vec![Value::int(1), Value::int(2), Value::int(3)]);
+
+        let val = Value::tuple(idx);
+        assert!(val.is_tuple());
+        assert!(val.is_aggregate());
+        assert!(!val.is_list());
+        assert_eq!(val.as_tuple_idx(), Some(idx));
+        assert_eq!(val.display(&heap), "(1, 2, 3)");
+    }
+
+    #[test]
+    fn test_tuple_heterogeneous() {
+        let mut heap = Heap::new();
+        let interner = Rodeo::default();
+
+        let str_idx = heap.alloc_string("hello".to_string());
+        let idx = heap.alloc_tuple(vec![
+            Value::int(42),
+            Value::bool(true),
+            Value::dynamic_string(str_idx),
+        ]);
+
+        let val = Value::tuple(idx);
+        assert_eq!(
+            val.display_with_interner(&heap, &interner),
+            "(42, true, hello)"
+        );
+    }
+
+    #[test]
+    fn test_gc_traces_tuple_elements() {
+        let mut heap = Heap::new();
+
+        // Create a string that's only reachable through a tuple element
+        let str_idx = heap.alloc_string("in tuple".to_string());
+        let tuple_idx = heap.alloc_tuple(vec![Value::dynamic_string(str_idx), Value::int(42)]);
+
+        // Only tuple is a direct root, but string should survive via element
+        let roots = vec![Value::tuple(tuple_idx)];
+        heap.collect(roots.into_iter());
+
+        // Both should survive
+        assert_eq!(heap.get_string(str_idx), "in tuple");
+        assert_eq!(heap.stats().strings_freed, 0);
+        assert_eq!(heap.stats().tuples_freed, 0);
+    }
+
+    #[test]
+    fn test_gc_reclaims_unreachable_tuples() {
+        let mut heap = Heap::new();
+
+        // Allocate tuples
+        let idx1 = heap.alloc_tuple(vec![Value::int(1), Value::int(2)]);
+        let _idx2 = heap.alloc_tuple(vec![Value::int(3), Value::int(4)]); // unreachable
+
+        // Only idx1 is a root
+        let roots = vec![Value::tuple(idx1)];
+        heap.collect(roots.into_iter());
+
+        // idx1 should still be accessible
+        assert_eq!(heap.get_tuple(idx1).elements.len(), 2);
+
+        // Stats should show one tuple freed
+        assert_eq!(heap.stats().tuples_freed, 1);
+    }
+
+    #[test]
+    fn test_tuple_equality() {
+        let mut heap = Heap::new();
+        let interner = Rodeo::default();
+
+        let t1 = heap.alloc_tuple(vec![Value::int(1), Value::int(2)]);
+        let t2 = heap.alloc_tuple(vec![Value::int(1), Value::int(2)]);
+        let t3 = heap.alloc_tuple(vec![Value::int(1), Value::int(3)]);
+
+        assert!(Value::tuple(t1).eq(&Value::tuple(t2), &heap, &interner));
+        assert!(!Value::tuple(t1).eq(&Value::tuple(t3), &heap, &interner));
     }
 }

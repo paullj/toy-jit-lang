@@ -86,6 +86,12 @@ category = "operator"
 priority = 2
 textmate_scope = "keyword.operator.range.toy"
 
+[[tokens]]
+name = "Dot"
+literal = "."
+category = "punctuation"
+textmate_scope = "punctuation.accessor.toy"
+
 # Arithmetic operators (int)
 [[tokens]]
 name = "Plus"

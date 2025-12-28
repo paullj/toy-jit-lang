@@ -58,6 +58,10 @@ impl Jit {
         builder.symbol("rt_list_len", runtime::rt_list_len as *const u8);
         builder.symbol("rt_echo", runtime::rt_echo as *const u8);
 
+        // Register runtime helpers for tuple operations
+        builder.symbol("rt_tuple_new", runtime::rt_tuple_new as *const u8);
+        builder.symbol("rt_tuple_get", runtime::rt_tuple_get as *const u8);
+
         let module = JITModule::new(builder);
 
         Self {

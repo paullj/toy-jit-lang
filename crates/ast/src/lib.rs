@@ -105,6 +105,8 @@ pub enum Expression {
     List(ListExpression),
     Index(IndexExpression),
     Slice(SliceExpression),
+    Tuple(TupleExpression),
+    TupleAccess(TupleAccessExpression),
 }
 
 impl Expression {
@@ -126,6 +128,8 @@ impl Expression {
             SyntaxKind::ListExpression => Self::List(ListExpression(node)),
             SyntaxKind::IndexExpression => Self::Index(IndexExpression(node)),
             SyntaxKind::SliceExpression => Self::Slice(SliceExpression(node)),
+            SyntaxKind::TupleExpression => Self::Tuple(TupleExpression(node)),
+            SyntaxKind::TupleAccessExpression => Self::TupleAccess(TupleAccessExpression(node)),
             _ => return None,
         };
         Some(result)
@@ -149,6 +153,8 @@ impl Expression {
             Expression::List(n) => n.syntax(),
             Expression::Index(n) => n.syntax(),
             Expression::Slice(n) => n.syntax(),
+            Expression::Tuple(n) => n.syntax(),
+            Expression::TupleAccess(n) => n.syntax(),
         }
     }
 }
@@ -742,6 +748,37 @@ impl ListType {
     }
 }
 
+// ========================================
+// Tuple expressions
+// ========================================
+
+ast_node!(TupleExpression, SyntaxKind::TupleExpression);
+
+impl TupleExpression {
+    /// Iterator over all elements in the tuple literal
+    pub fn elements(&self) -> impl Iterator<Item = Expression> {
+        self.0.children().filter_map(Expression::cast)
+    }
+}
+
+ast_node!(TupleAccessExpression, SyntaxKind::TupleAccessExpression);
+
+impl TupleAccessExpression {
+    /// The tuple being accessed (e.g., `point` in `point.0`)
+    pub fn tuple(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// The index being accessed (e.g., `0` in `point.0`)
+    pub fn index(&self) -> Option<u32> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Integer)
+            .and_then(|token| token.text().parse().ok())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -886,19 +923,20 @@ mod tests {
     }
 
     #[test]
-    fn parenthesis_missing_inner() {
-        // "()" with missing inner expression
+    fn empty_parens_is_empty_tuple() {
+        // "()" is the empty tuple (unit)
         let root = parse_root("x := ()");
         let item = root.items().next().unwrap();
         let Item::VariableDefinition(def) = item else {
             panic!("expected VariableDefinition")
         };
-        let Expression::Parenthesis(paren) = def.value().unwrap() else {
-            panic!("expected ParenthesisExpression")
+        let Expression::Tuple(tuple) = def.value().unwrap() else {
+            panic!("expected TupleExpression")
         };
-        assert!(
-            paren.expression().is_none(),
-            "empty parens should return None"
+        assert_eq!(
+            tuple.elements().count(),
+            0,
+            "empty parens should be empty tuple"
         );
     }
 

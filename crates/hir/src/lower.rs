@@ -403,6 +403,8 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
         ast::Expression::List(list) => lower_list(ctx, list),
         ast::Expression::Index(index) => lower_index(ctx, index),
         ast::Expression::Slice(slice) => lower_slice(ctx, slice),
+        ast::Expression::Tuple(tuple) => lower_tuple(ctx, tuple),
+        ast::Expression::TupleAccess(access) => lower_tuple_access(ctx, access),
     }
 }
 
@@ -514,6 +516,33 @@ fn lower_slice(ctx: &mut Ctx, slice: ast::SliceExpression) -> Expression {
         start,
         end,
     }
+}
+
+fn lower_tuple(ctx: &mut Ctx, tuple: ast::TupleExpression) -> Expression {
+    let elements: Vec<ExprIdx> = tuple
+        .elements()
+        .map(|e| {
+            let span = e.syntax().text_range();
+            let expr = lower_expression(ctx, Some(e));
+            ctx.alloc(expr, span)
+        })
+        .collect();
+
+    Expression::Tuple { elements }
+}
+
+fn lower_tuple_access(ctx: &mut Ctx, access: ast::TupleAccessExpression) -> Expression {
+    let tuple_ast = access.tuple();
+    let tuple_span = tuple_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let tuple_expr = lower_expression(ctx, tuple_ast);
+    let tuple = ctx.alloc(tuple_expr, tuple_span);
+
+    let index = access.index().unwrap_or(0);
+
+    Expression::TupleAccess { tuple, index }
 }
 
 fn lower_infix(ctx: &mut Ctx, ast: ast::InfixExpression) -> Expression {
@@ -1205,12 +1234,16 @@ mod tests {
     }
 
     #[test]
-    fn malformed_empty_parens() {
+    fn empty_parens_is_empty_tuple() {
+        // "()" is the empty tuple (unit), not a missing expression
         let result = lower_src("x := ()");
         let Item::Definition(Definition::Variable { value, .. }) = &result.items[0] else {
             panic!("expected variable definition");
         };
-        assert!(matches!(value, Expression::Missing));
+        let Expression::Tuple { elements } = value else {
+            panic!("expected Tuple");
+        };
+        assert!(elements.is_empty());
     }
 
     #[test]

@@ -339,6 +339,8 @@ fn get_expr_type(
         hir::Expression::List { .. }
         | hir::Expression::Index { .. }
         | hir::Expression::Slice { .. } => infer::Type::Unit,
+        // Tuple expressions - type comes from inference
+        hir::Expression::Tuple { .. } | hir::Expression::TupleAccess { .. } => infer::Type::Unit,
     }
 }
 

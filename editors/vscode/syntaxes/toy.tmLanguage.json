@@ -50,6 +50,10 @@
       "name": "keyword.operator.range.toy"
     },
     {
+      "match": "\\.",
+      "name": "punctuation.accessor.toy"
+    },
+    {
       "match": "\\+",
       "name": "keyword.operator.arithmetic.toy"
     },

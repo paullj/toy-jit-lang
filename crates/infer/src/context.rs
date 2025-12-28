@@ -403,6 +403,10 @@ impl<'a> InferCtx<'a> {
                 start,
                 end,
             } => self.infer_slice(*collection, *start, *end, span),
+            Expression::Tuple { elements } => self.infer_tuple(elements),
+            Expression::TupleAccess { tuple, index } => {
+                self.infer_tuple_access(*tuple, *index, span)
+            }
         }
     }
 
@@ -656,6 +660,51 @@ impl<'a> InferCtx<'a> {
         }
 
         self.subst.apply(&expected_list)
+    }
+
+    fn infer_tuple(&mut self, elements: &[ExprIdx]) -> Type {
+        let elem_types: Vec<Type> = elements
+            .iter()
+            .map(|&idx| {
+                let (ty, _) = self.infer_expr_idx(idx);
+                self.subst.apply(&ty)
+            })
+            .collect();
+        Type::Tuple(elem_types)
+    }
+
+    fn infer_tuple_access(&mut self, tuple: ExprIdx, index: u32, span: TextRange) -> Type {
+        let (tuple_ty, tuple_span) = self.infer_expr_idx(tuple);
+        let resolved = self.subst.apply(&tuple_ty);
+
+        match resolved {
+            Type::Tuple(elems) => {
+                if (index as usize) < elems.len() {
+                    elems[index as usize].clone()
+                } else {
+                    self.diagnostics
+                        .push(InferDiagnostic::TupleIndexOutOfBounds {
+                            index,
+                            tuple_size: elems.len(),
+                            span: to_span(span),
+                        });
+                    Type::Error
+                }
+            }
+            Type::Var(_) => {
+                // Can't statically determine tuple type yet
+                // Return a fresh type var
+                Type::Var(self.fresh_var())
+            }
+            _ => {
+                self.diagnostics.push(InferDiagnostic::TypeMismatch {
+                    expected: "tuple".to_string(),
+                    found: resolved.to_string(),
+                    span: to_span(tuple_span),
+                });
+                Type::Error
+            }
+        }
     }
 
     fn lookup(&mut self, name: &str, span: TextRange) -> Type {

@@ -41,6 +41,7 @@ pub enum Type {
     Var(TypeVar),
     Function { params: Vec<Type>, ret: Box<Type> },
     List(Box<Type>),
+    Tuple(Vec<Type>),
     Error,
 }
 
@@ -72,6 +73,11 @@ impl Type {
             }
             Type::List(elem) => {
                 elem.collect_free_vars(vars);
+            }
+            Type::Tuple(elems) => {
+                for elem in elems {
+                    elem.collect_free_vars(vars);
+                }
             }
             _ => {}
         }
@@ -109,6 +115,16 @@ impl fmt::Display for Type {
                 }
             }
             Type::List(elem) => write!(f, "list[{}]", elem),
+            Type::Tuple(elems) => {
+                write!(f, "(")?;
+                for (i, elem) in elems.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                write!(f, ")")
+            }
             Type::Error => write!(f, "<error>"),
         }
     }

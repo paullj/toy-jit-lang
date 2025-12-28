@@ -598,6 +598,8 @@ impl<'a> LowerCtx<'a> {
                 start,
                 end,
             } => self.lower_slice(*collection, *start, *end),
+            Expression::Tuple { elements } => self.lower_tuple(elements),
+            Expression::TupleAccess { tuple, index } => self.lower_tuple_access(*tuple, *index),
         }
     }
 
@@ -1280,6 +1282,31 @@ impl<'a> LowerCtx<'a> {
             list,
             start: start_op,
             end: end_op,
+        });
+
+        Operand::VReg(dst)
+    }
+
+    fn lower_tuple(&mut self, elements: &[ExprIdx]) -> Operand {
+        let element_ops: Vec<Operand> = elements.iter().map(|e| self.lower_expr_idx(*e)).collect();
+
+        let dst = self.fresh_vreg();
+        self.emit(Inst::TupleNew {
+            dst,
+            elements: element_ops,
+        });
+
+        Operand::VReg(dst)
+    }
+
+    fn lower_tuple_access(&mut self, tuple: ExprIdx, index: u32) -> Operand {
+        let tuple_op = self.lower_expr_idx(tuple);
+        let dst = self.fresh_vreg();
+
+        self.emit(Inst::TupleGet {
+            dst,
+            tuple: tuple_op,
+            index,
         });
 
         Operand::VReg(dst)

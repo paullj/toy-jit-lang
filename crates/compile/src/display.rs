@@ -282,6 +282,18 @@ fn disassemble_inst(code: &[u8], offset: usize, f: &mut fmt::Formatter<'_>) -> f
             let list = code[offset + 2];
             writeln!(f, "list.len s{} s{}", dst, list)
         }
+        Opcode::TupleNew => {
+            let dst = code[offset + 1];
+            let elem_base = code[offset + 2];
+            let elem_count = code[offset + 3];
+            writeln!(f, "tuple.new s{} s{} {}", dst, elem_base, elem_count)
+        }
+        Opcode::TupleGet => {
+            let dst = code[offset + 1];
+            let tuple = code[offset + 2];
+            let index = code[offset + 3];
+            writeln!(f, "tuple.get s{} s{} {}", dst, tuple, index)
+        }
         Opcode::Halt => {
             writeln!(f, "halt")
         }
@@ -329,6 +341,8 @@ fn inst_size(op: Opcode) -> usize {
         Opcode::ListGet => 4,      // op + dst + list + index
         Opcode::ListSlice => 5,    // op + dst + list + start + end
         Opcode::ListLen => 3,      // op + dst + list
+        Opcode::TupleNew => 4,     // op + dst + elem_base + elem_count
+        Opcode::TupleGet => 4,     // op + dst + tuple + index
         Opcode::Halt => 1,         // op
     }
 }

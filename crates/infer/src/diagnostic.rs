@@ -70,4 +70,22 @@ pub enum InferDiagnostic {
         #[label("expected function, found `{ty}`")]
         span: SourceSpan,
     },
+
+    #[error("tuple index {index} out of bounds for tuple of size {tuple_size}")]
+    #[diagnostic(code(infer::tuple_index_out_of_bounds))]
+    TupleIndexOutOfBounds {
+        index: u32,
+        tuple_size: usize,
+        #[label("index out of bounds")]
+        span: SourceSpan,
+    },
+
+    #[error("type mismatch: expected `{expected}`, found `{found}`")]
+    #[diagnostic(code(infer::type_mismatch))]
+    TypeMismatch {
+        expected: String,
+        found: String,
+        #[label("expected `{expected}`, found `{found}`")]
+        span: SourceSpan,
+    },
 }

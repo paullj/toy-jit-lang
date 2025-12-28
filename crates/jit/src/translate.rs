@@ -166,7 +166,9 @@ impl<'a> FunctionTranslator<'a> {
             | Inst::ListNew { dst, .. }
             | Inst::ListGet { dst, .. }
             | Inst::ListSlice { dst, .. }
-            | Inst::ListLen { dst, .. } => Some(*dst),
+            | Inst::ListLen { dst, .. }
+            | Inst::TupleNew { dst, .. }
+            | Inst::TupleGet { dst, .. } => Some(*dst),
             Inst::Call { dst, .. } | Inst::CallIndirect { dst, .. } => *dst,
             _ => None,
         }
@@ -600,6 +602,72 @@ impl<'a> FunctionTranslator<'a> {
                 self.builder.def_var(vreg_vars[dst], result);
                 self.last_value = Some(result);
             }
+            // Tuple operations
+            Inst::TupleNew { dst, elements } => {
+                let ctx = self
+                    .context_ptr
+                    .expect("tuple ops need context (main only)");
+                let count = elements.len();
+
+                if count == 0 {
+                    // Empty tuple - pass null pointer
+                    let null_ptr = self.builder.ins().iconst(self.int_type, 0);
+                    let count_val = self.builder.ins().iconst(types::I64, 0);
+                    let func_ref = self.get_runtime_fn("rt_tuple_new");
+                    let call = self
+                        .builder
+                        .ins()
+                        .call(func_ref, &[ctx, null_ptr, count_val]);
+                    let result = self.builder.inst_results(call)[0];
+                    self.builder.def_var(vreg_vars[dst], result);
+                    self.last_value = Some(result);
+                } else {
+                    // Allocate stack slot for elements
+                    let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        (count * 8) as u32,
+                        8, // alignment
+                    ));
+
+                    // Store each element (NaN-boxed) into the stack slot
+                    for (i, elem) in elements.iter().enumerate() {
+                        let elem_val = self.operand_to_nan_boxed_with_vars(elem, vreg_vars);
+                        let offset = (i * 8) as i32;
+                        self.builder.ins().stack_store(elem_val, slot, offset);
+                    }
+
+                    // Get pointer to stack slot
+                    let elem_ptr = self.builder.ins().stack_addr(self.int_type, slot, 0);
+                    let count_val = self.builder.ins().iconst(types::I64, count as i64);
+
+                    let func_ref = self.get_runtime_fn("rt_tuple_new");
+                    let call = self
+                        .builder
+                        .ins()
+                        .call(func_ref, &[ctx, elem_ptr, count_val]);
+                    let result = self.builder.inst_results(call)[0];
+
+                    self.builder.def_var(vreg_vars[dst], result);
+                    self.last_value = Some(result);
+                }
+            }
+            Inst::TupleGet { dst, tuple, index } => {
+                let ctx = self
+                    .context_ptr
+                    .expect("tuple ops need context (main only)");
+                let tuple_val = self.operand_to_value_with_vars(tuple, vreg_vars);
+                let idx_val = self.builder.ins().iconst(types::I64, *index as i64);
+
+                let func_ref = self.get_runtime_fn("rt_tuple_get");
+                let call = self
+                    .builder
+                    .ins()
+                    .call(func_ref, &[ctx, tuple_val, idx_val]);
+                let result = self.builder.inst_results(call)[0];
+
+                self.builder.def_var(vreg_vars[dst], result);
+                self.last_value = Some(result);
+            }
         }
     }
 
@@ -648,6 +716,20 @@ impl<'a> FunctionTranslator<'a> {
                 // fn(ctx: *mut, val: i64)
                 sig.params.push(AbiParam::new(ptr_type)); // ctx
                 sig.params.push(AbiParam::new(types::I64)); // NaN-boxed value
+            }
+            "rt_tuple_new" => {
+                // fn(ctx: *mut, elements_ptr: *const i64, count: i64) -> i64
+                sig.params.push(AbiParam::new(ptr_type)); // ctx
+                sig.params.push(AbiParam::new(ptr_type)); // elements_ptr
+                sig.params.push(AbiParam::new(types::I64)); // count
+                sig.returns.push(AbiParam::new(types::I64)); // tuple value
+            }
+            "rt_tuple_get" => {
+                // fn(ctx: *mut, tuple: i64, index: i64) -> i64
+                sig.params.push(AbiParam::new(ptr_type)); // ctx
+                sig.params.push(AbiParam::new(types::I64)); // tuple
+                sig.params.push(AbiParam::new(types::I64)); // index
+                sig.returns.push(AbiParam::new(types::I64)); // element value
             }
             _ => panic!("unknown runtime function: {}", name),
         }
