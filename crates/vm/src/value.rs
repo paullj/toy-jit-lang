@@ -31,6 +31,7 @@ const TAG_UNIT: u64 = 0x0003_0000_0000_0000; // 011
 const TAG_STRING: u64 = 0x0004_0000_0000_0000; // 100
 const TAG_CLOSURE: u64 = 0x0005_0000_0000_0000; // 101
 const TAG_AGGREGATE: u64 = 0x0006_0000_0000_0000; // 110
+#[allow(dead_code)]
 const TAG_OBJECT: u64 = 0x0007_0000_0000_0000; // 111 (reserved)
 
 // String subtypes (bit 47 of payload)

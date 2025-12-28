@@ -166,9 +166,9 @@ impl<'a> FunctionTranslator<'a> {
             | Inst::ListNew { dst, .. }
             | Inst::ListGet { dst, .. }
             | Inst::ListSlice { dst, .. }
-            | Inst::ListLen { dst, .. } => Some(*dst),
+            | Inst::ListLen { dst, .. }
             | Inst::TupleNew { dst, .. }
-            | Inst::TupleGet { dst, .. }
+            | Inst::TupleGet { dst, .. } => Some(*dst),
             Inst::Call { dst, .. } | Inst::CallIndirect { dst, .. } => *dst,
             _ => None,
         }
