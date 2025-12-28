@@ -478,7 +478,8 @@ impl<'a> Compiler<'a> {
             Inst::TupleGet { dst, tuple, index } => {
                 let tuple_slot = self.load_operand(tuple);
                 let dst_slot = self.vreg_to_physical(*dst);
-                self.writer.emit_tuple_get(dst_slot, tuple_slot, *index as u8);
+                self.writer
+                    .emit_tuple_get(dst_slot, tuple_slot, *index as u8);
             }
         }
     }

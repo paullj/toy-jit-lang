@@ -568,7 +568,9 @@ impl<'a> FunctionTranslator<'a> {
 
             // Tuple operations
             Inst::TupleNew { dst, elements } => {
-                let ctx = self.context_ptr.expect("tuple ops need context (main only)");
+                let ctx = self
+                    .context_ptr
+                    .expect("tuple ops need context (main only)");
                 let count = elements.len();
 
                 if count == 0 {
@@ -576,7 +578,10 @@ impl<'a> FunctionTranslator<'a> {
                     let null_ptr = self.builder.ins().iconst(self.int_type, 0);
                     let count_val = self.builder.ins().iconst(types::I64, 0);
                     let func_ref = self.get_runtime_fn("rt_tuple_new");
-                    let call = self.builder.ins().call(func_ref, &[ctx, null_ptr, count_val]);
+                    let call = self
+                        .builder
+                        .ins()
+                        .call(func_ref, &[ctx, null_ptr, count_val]);
                     let result = self.builder.inst_results(call)[0];
                     self.builder.def_var(vreg_vars[dst], result);
                     self.last_value = Some(result);
@@ -612,12 +617,17 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             Inst::TupleGet { dst, tuple, index } => {
-                let ctx = self.context_ptr.expect("tuple ops need context (main only)");
+                let ctx = self
+                    .context_ptr
+                    .expect("tuple ops need context (main only)");
                 let tuple_val = self.operand_to_value_with_vars(tuple, vreg_vars);
                 let idx_val = self.builder.ins().iconst(types::I64, *index as i64);
 
                 let func_ref = self.get_runtime_fn("rt_tuple_get");
-                let call = self.builder.ins().call(func_ref, &[ctx, tuple_val, idx_val]);
+                let call = self
+                    .builder
+                    .ins()
+                    .call(func_ref, &[ctx, tuple_val, idx_val]);
                 let result = self.builder.inst_results(call)[0];
 
                 self.builder.def_var(vreg_vars[dst], result);

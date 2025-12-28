@@ -336,13 +336,11 @@ impl Value {
                 QNAN_UNIT => "Unit",
                 QNAN_STRING => "String",
                 QNAN_CLOSURE => "Closure",
-                QNAN_AGGREGATE => {
-                    match self.0 & AGG_SUBTYPE_MASK {
-                        AGG_LIST => "List",
-                        AGG_TUPLE => "Tuple",
-                        _ => "Unknown",
-                    }
-                }
+                QNAN_AGGREGATE => match self.0 & AGG_SUBTYPE_MASK {
+                    AGG_LIST => "List",
+                    AGG_TUPLE => "Tuple",
+                    _ => "Unknown",
+                },
                 _ => "Unknown",
             }
         }
@@ -408,8 +406,7 @@ impl Value {
             QNAN_STRING => {
                 if self.is_interned_string() {
                     let payload = (self.0 & STRING_PAYLOAD_MASK) as usize;
-                    let spur =
-                        Spur::try_from_usize(payload).expect("invalid interned string spur");
+                    let spur = Spur::try_from_usize(payload).expect("invalid interned string spur");
                     interner.resolve(&spur).to_string()
                 } else {
                     let idx = (self.0 & STRING_PAYLOAD_MASK) as u32;

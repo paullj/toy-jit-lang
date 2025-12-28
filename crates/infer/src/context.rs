@@ -624,11 +624,12 @@ impl<'a> InferCtx<'a> {
                 if (index as usize) < elems.len() {
                     elems[index as usize].clone()
                 } else {
-                    self.diagnostics.push(InferDiagnostic::TupleIndexOutOfBounds {
-                        index,
-                        tuple_size: elems.len(),
-                        span: to_span(span),
-                    });
+                    self.diagnostics
+                        .push(InferDiagnostic::TupleIndexOutOfBounds {
+                            index,
+                            tuple_size: elems.len(),
+                            span: to_span(span),
+                        });
                     Type::Error
                 }
             }
