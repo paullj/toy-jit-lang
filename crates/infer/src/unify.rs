@@ -15,6 +15,7 @@ fn occurs_check(var: TypeVar, ty: &Type) -> bool {
             params.iter().any(|p| occurs_check(var, p)) || occurs_check(var, ret)
         }
         Type::List(elem) => occurs_check(var, elem),
+        Type::Tuple(elems) => elems.iter().any(|e| occurs_check(var, e)),
         _ => false,
     }
 }
@@ -76,6 +77,23 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, UnifyError> {
 
         // List types
         (Type::List(e1), Type::List(e2)) => unify(e1, e2),
+
+        // Tuple types
+        (Type::Tuple(elems1), Type::Tuple(elems2)) => {
+            if elems1.len() != elems2.len() {
+                return Err(UnifyError::ArityMismatch {
+                    expected: elems1.len(),
+                    found: elems2.len(),
+                });
+            }
+
+            let mut s = Subst::new();
+            for (a, b) in elems1.iter().zip(elems2.iter()) {
+                let s2 = unify(&s.apply(a), &s.apply(b))?;
+                s = s2.compose(&s);
+            }
+            Ok(s)
+        }
 
         // Mismatch
         _ => Err(UnifyError::Mismatch {

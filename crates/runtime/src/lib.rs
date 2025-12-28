@@ -259,5 +259,7 @@ fn get_expr_type(expr: &Expression, hir: &LowerResult, inferred: &InferenceResul
         Expression::Continue { .. } => Type::Unit,
         // List expressions - type comes from inference
         Expression::List { .. } | Expression::Index { .. } | Expression::Slice { .. } => Type::Unit,
+        // Tuple expressions - type comes from inference
+        Expression::Tuple { .. } | Expression::TupleAccess { .. } => Type::Unit,
     }
 }

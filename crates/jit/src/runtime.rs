@@ -115,3 +115,45 @@ pub extern "C" fn rt_list_slice(
     ctx.heap.get_list_mut(new_idx).elements = slice;
     Value::list(new_idx).to_bits()
 }
+
+/// Allocate a new tuple from an array of NaN-boxed elements.
+/// elements_ptr: pointer to array of i64 (NaN-boxed values)
+/// count: number of elements
+/// Returns NaN-boxed tuple Value as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_tuple_new(
+    ctx: *mut RuntimeContext,
+    elements_ptr: *const i64,
+    count: i64,
+) -> i64 {
+    let ctx = unsafe { &mut *ctx };
+    let elements: Vec<Value> = (0..count as usize)
+        .map(|i| {
+            let bits = unsafe { *elements_ptr.add(i) };
+            Value::from_bits(bits)
+        })
+        .collect();
+
+    let idx = ctx.heap.alloc_tuple(elements);
+    Value::tuple(idx).to_bits()
+}
+
+/// Get tuple element by index. Returns NaN-boxed Value as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_tuple_get(ctx: *mut RuntimeContext, tuple_val: i64, index: i64) -> i64 {
+    let ctx = unsafe { &*ctx };
+    let tuple_idx = Value::from_bits(tuple_val)
+        .as_tuple_idx()
+        .expect("rt_tuple_get: not a tuple");
+    let tuple = ctx.heap.get_tuple(tuple_idx);
+
+    if index < 0 || index >= tuple.elements.len() as i64 {
+        panic!(
+            "tuple index out of bounds: {} (len {})",
+            index,
+            tuple.elements.len()
+        );
+    }
+
+    tuple.elements[index as usize].to_bits()
+}

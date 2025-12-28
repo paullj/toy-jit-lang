@@ -27,6 +27,7 @@ pub enum SyntaxKind {
     Comma,
     Colon,
     DotDot,
+    Dot,
 
     // Tokens - Arithmetic operators
     Plus,
@@ -113,6 +114,10 @@ pub enum SyntaxKind {
     SliceExpression,
     IndexAssignment,
     ListType,
+
+    // Tuple nodes
+    TupleExpression,
+    TupleAccessExpression,
 }
 
 impl SyntaxKind {
@@ -148,6 +153,7 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::Comma => SyntaxKind::Comma,
             TokenKind::Colon => SyntaxKind::Colon,
             TokenKind::DotDot => SyntaxKind::DotDot,
+            TokenKind::Dot => SyntaxKind::Dot,
 
             // Arithmetic operators
             TokenKind::Plus => SyntaxKind::Plus,

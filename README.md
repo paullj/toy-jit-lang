@@ -35,6 +35,7 @@ toy is a simple programming language that is made for fun.
   * infer has some stuff in there which is not related to type inference
 
 * improvements
+  * rename int to Int, float to Float, bool to Bool, string to String
   * handle postfix operators in parser better
     * should be the same as prefix operators
   * is_bracket_index_not_list() uses speculative (re)lexing to check if [...] contains a comma (ie list) or not (ie index/slice)
@@ -67,7 +68,6 @@ toy is a simple programming language that is made for fun.
 * garbage collection improvements
   * but what?
 
-* for loops
 * structs
 * tuples
 * enums

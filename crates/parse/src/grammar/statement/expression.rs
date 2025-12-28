@@ -73,7 +73,7 @@ const EXPR_RECOVERY: TokenSet = EXPR_FIRST.union(TokenSet::single(TokenKind::New
 fn expression_with_binding_power(p: &mut Parser, min_bp: u8) -> Option<CompletedMarker> {
     let mut lhs = lhs(p)?;
 
-    // Handle postfix operations (call expressions, index/slice)
+    // Handle postfix operations (call expressions, index/slice, tuple access)
     loop {
         // Check for newline terminator, but allow `[` to continue if it's an index
         // expression (not a list literal). This allows `x\n[0]` to parse as `x[0]`.
@@ -90,6 +90,8 @@ fn expression_with_binding_power(p: &mut Parser, min_bp: u8) -> Option<Completed
             lhs = call_expression(p, lhs);
         } else if p.at(TokenKind::LeftBracket) {
             lhs = index_or_slice_expression(p, lhs);
+        } else if p.at(TokenKind::Dot) {
+            lhs = tuple_access_expression(p, lhs);
         } else {
             break;
         }
@@ -237,6 +239,7 @@ fn prefix_expression(p: &mut Parser) -> Option<CompletedMarker> {
     Some(m.complete(p, SyntaxKind::PrefixExpression))
 }
 
+/// Parses parenthesis expression or tuple: `(expr)` or `(expr, expr, ...)` or `()`
 fn parenthesis_expression(p: &mut Parser) -> CompletedMarker {
     debug_assert!(p.at(TokenKind::LeftParenthesis));
 
@@ -244,7 +247,37 @@ fn parenthesis_expression(p: &mut Parser) -> CompletedMarker {
     p.consume(); // eat '('
     p.enter_delimiter(); // newlines allowed inside parens
 
+    // Check for empty tuple/unit: ()
+    if p.at(TokenKind::RightParenthesis) {
+        p.exit_delimiter();
+        p.consume(); // eat ')'
+        return m.complete(p, SyntaxKind::TupleExpression);
+    }
+
+    // Parse first expression
     expression_with_binding_power(p, 0);
+
+    // Check if this is a tuple (has comma) or just parenthesized expression
+    let is_tuple = if p.at(TokenKind::Comma) {
+        p.consume(); // eat ','
+
+        // Parse remaining elements
+        while !p.at(TokenKind::RightParenthesis) && !p.is_at_end() {
+            // Handle trailing comma
+            if p.at(TokenKind::RightParenthesis) {
+                break;
+            }
+
+            expression_with_binding_power(p, 0);
+
+            if !p.at(TokenKind::RightParenthesis) && !p.eat(TokenKind::Comma) {
+                break;
+            }
+        }
+        true
+    } else {
+        false
+    };
 
     p.exit_delimiter();
     if !p.eat(TokenKind::RightParenthesis) {
@@ -258,7 +291,11 @@ fn parenthesis_expression(p: &mut Parser) -> CompletedMarker {
         });
     }
 
-    m.complete(p, SyntaxKind::ParenthesisExpression)
+    if is_tuple {
+        m.complete(p, SyntaxKind::TupleExpression)
+    } else {
+        m.complete(p, SyntaxKind::ParenthesisExpression)
+    }
 }
 
 pub(crate) fn block_expression(p: &mut Parser) -> CompletedMarker {
@@ -442,6 +479,29 @@ fn list_expression(p: &mut Parser) -> CompletedMarker {
     }
 
     m.complete(p, SyntaxKind::ListExpression)
+}
+
+/// Parses tuple field access: `expr.0`, `expr.1`, etc.
+fn tuple_access_expression(p: &mut Parser, tuple: CompletedMarker) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::Dot));
+
+    let m = tuple.precede(p);
+    p.consume(); // eat '.'
+
+    // Expect an integer literal for tuple index
+    if !p.at(TokenKind::Integer) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "tuple index (integer)".to_string(),
+            found,
+        });
+    } else {
+        p.consume(); // eat integer
+    }
+
+    m.complete(p, SyntaxKind::TupleAccessExpression)
 }
 
 /// Parses index or slice: `expr[idx]` or `expr[start..end]`

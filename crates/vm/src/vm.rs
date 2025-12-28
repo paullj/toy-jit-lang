@@ -666,6 +666,33 @@ impl<'a> Vm<'a> {
                     self.set(base, dst, result);
                 }
 
+                // Tuple operations
+                Opcode::TupleNew => {
+                    let dst = reader.read_u8();
+                    let elem_base = reader.read_u8();
+                    let elem_count = reader.read_u8();
+                    self.maybe_gc();
+
+                    let elements: Vec<Value> = (0..elem_count)
+                        .map(|i| self.get(base, elem_base + i))
+                        .collect();
+
+                    let tuple_idx = self.heap.alloc_tuple(elements);
+                    let result = Value::tuple(tuple_idx);
+                    self.set(base, dst, result);
+                }
+
+                Opcode::TupleGet => {
+                    let dst = reader.read_u8();
+                    let tuple = reader.read_u8();
+                    let index = reader.read_u8();
+
+                    let tuple_idx = self.get(base, tuple).as_tuple_idx_unchecked();
+                    let tuple_data = self.heap.get_tuple(tuple_idx);
+                    let result = tuple_data.elements[index as usize];
+                    self.set(base, dst, result);
+                }
+
                 // End
                 Opcode::Halt => {
                     return Ok((Value::unit(), self.heap));

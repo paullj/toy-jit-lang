@@ -71,16 +71,20 @@ pub enum Opcode {
     ListGet = 41,   // dst:u8, list:u8, index:u8
     ListSlice = 42, // dst:u8, list:u8, start:u8, end:u8
 
+    // Tuple operations (2)
+    TupleNew = 43, // dst:u8, elem_base:u8, elem_count:u8
+    TupleGet = 44, // dst:u8, tuple:u8, index:u8
+
     // End (1)
-    Halt = 43,
+    Halt = 45,
 }
 
 impl Opcode {
     /// Decode opcode from u8.
     #[inline(always)]
     pub fn from_u8(byte: u8) -> Option<Opcode> {
-        if byte <= Self::Halt as u8 {
-            // NOTE: We verified the byte is in range
+        if byte <= 45 {
+            // NOTE: We verified the byte is in range (0..=Halt)
             Some(unsafe { std::mem::transmute::<u8, opcode::Opcode>(byte) })
         } else {
             None

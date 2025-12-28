@@ -33,6 +33,7 @@ impl Subst {
                 ret: Box::new(self.apply(ret)),
             },
             Type::List(elem) => Type::List(Box::new(self.apply(elem))),
+            Type::Tuple(elems) => Type::Tuple(elems.iter().map(|e| self.apply(e)).collect()),
             _ => ty.clone(),
         }
     }

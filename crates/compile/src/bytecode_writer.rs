@@ -366,6 +366,24 @@ impl BytecodeWriter {
         self.write_u8(start);
         self.write_u8(end);
     }
+
+    // === Tuple operations ===
+
+    /// TupleNew: dst:u8, elem_base:u8, elem_count:u8
+    pub fn emit_tuple_new(&mut self, dst: u8, elem_base: u8, elem_count: u8) {
+        self.emit_op(Opcode::TupleNew);
+        self.write_u8(dst);
+        self.write_u8(elem_base);
+        self.write_u8(elem_count);
+    }
+
+    /// TupleGet: dst:u8, tuple:u8, index:u8
+    pub fn emit_tuple_get(&mut self, dst: u8, tuple: u8, index: u8) {
+        self.emit_op(Opcode::TupleGet);
+        self.write_u8(dst);
+        self.write_u8(tuple);
+        self.write_u8(index);
+    }
 }
 
 impl Default for BytecodeWriter {

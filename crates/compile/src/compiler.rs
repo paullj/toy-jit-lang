@@ -464,6 +464,22 @@ impl<'a> Compiler<'a> {
                 self.writer
                     .emit_list_slice(dst_slot, list_slot, start_slot, end_slot);
             }
+
+            // Tuple operations
+            Inst::TupleNew { dst, elements } => {
+                let elem_base = self.next_slot;
+                for (i, elem) in elements.iter().enumerate() {
+                    self.load_operand_to(elem, elem_base + i as u8);
+                }
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.writer
+                    .emit_tuple_new(dst_slot, elem_base, elements.len() as u8);
+            }
+            Inst::TupleGet { dst, tuple, index } => {
+                let tuple_slot = self.load_operand(tuple);
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.writer.emit_tuple_get(dst_slot, tuple_slot, *index as u8);
+            }
         }
     }
 

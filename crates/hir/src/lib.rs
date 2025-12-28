@@ -145,6 +145,13 @@ pub enum Expression {
         start: Option<ExprIdx>,
         end: Option<ExprIdx>,
     },
+    Tuple {
+        elements: Vec<ExprIdx>,
+    },
+    TupleAccess {
+        tuple: ExprIdx,
+        index: u32,
+    },
 }
 
 /// Item inside a block expression
