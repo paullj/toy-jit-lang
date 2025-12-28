@@ -98,6 +98,8 @@ pub enum Expression {
     If(IfExpression),
     Loop(LoopExpression),
     While(WhileExpression),
+    For(ForExpression),
+    Range(RangeExpression),
     Function(FunctionExpression),
     Call(CallExpression),
     List(ListExpression),
@@ -117,6 +119,8 @@ impl Expression {
             SyntaxKind::IfExpression => Self::If(IfExpression(node)),
             SyntaxKind::LoopExpression => Self::Loop(LoopExpression(node)),
             SyntaxKind::WhileExpression => Self::While(WhileExpression(node)),
+            SyntaxKind::ForExpression => Self::For(ForExpression(node)),
+            SyntaxKind::RangeExpression => Self::Range(RangeExpression(node)),
             SyntaxKind::FunctionExpression => Self::Function(FunctionExpression(node)),
             SyntaxKind::CallExpression => Self::Call(CallExpression(node)),
             SyntaxKind::ListExpression => Self::List(ListExpression(node)),
@@ -138,6 +142,8 @@ impl Expression {
             Expression::If(n) => n.syntax(),
             Expression::Loop(n) => n.syntax(),
             Expression::While(n) => n.syntax(),
+            Expression::For(n) => n.syntax(),
+            Expression::Range(n) => n.syntax(),
             Expression::Function(n) => n.syntax(),
             Expression::Call(n) => n.syntax(),
             Expression::List(n) => n.syntax(),
@@ -551,6 +557,58 @@ impl WhileExpression {
 
     pub fn body(&self) -> Option<BlockExpression> {
         self.0.children().find_map(BlockExpression::cast)
+    }
+}
+
+ast_node!(ForExpression, SyntaxKind::ForExpression);
+
+impl ForExpression {
+    /// The loop variable binding (the identifier after 'for')
+    pub fn binding(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|t| t.kind() == SyntaxKind::Identifier)
+    }
+
+    /// The iterable expression (could be a regular expression or RangeExpression)
+    pub fn iterable(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// Optional label after colon
+    pub fn label(&self) -> Option<SyntaxToken> {
+        let mut found_colon = false;
+        self.0.children_with_tokens().find_map(|child| {
+            if child.kind() == SyntaxKind::Colon {
+                found_colon = true;
+                return None;
+            }
+            if found_colon && child.kind() == SyntaxKind::Identifier {
+                child.into_token()
+            } else {
+                None
+            }
+        })
+    }
+
+    /// The loop body block
+    pub fn body(&self) -> Option<BlockExpression> {
+        self.0.children().find_map(BlockExpression::cast)
+    }
+}
+
+ast_node!(RangeExpression, SyntaxKind::RangeExpression);
+
+impl RangeExpression {
+    /// The start expression (before ..)
+    pub fn start(&self) -> Option<Expression> {
+        self.0.children().filter_map(Expression::cast).next()
+    }
+
+    /// The end expression (after ..)
+    pub fn end(&self) -> Option<Expression> {
+        self.0.children().filter_map(Expression::cast).nth(1)
     }
 }
 

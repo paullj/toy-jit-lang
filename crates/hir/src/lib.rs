@@ -127,6 +127,16 @@ pub enum Expression {
         label: Option<Ident>,
         body: ExprIdx,
     },
+    For {
+        binding: Ident,
+        iterable: ExprIdx,
+        label: Option<Ident>,
+        body: ExprIdx,
+    },
+    Range {
+        start: ExprIdx,
+        end: ExprIdx,
+    },
     Break {
         label: Option<Ident>,
     },

@@ -331,6 +331,8 @@ fn get_expr_type(
         hir::Expression::Echo { .. } => infer::Type::Unit,
         hir::Expression::Loop { .. } => infer::Type::Unit,
         hir::Expression::While { .. } => infer::Type::Unit,
+        hir::Expression::For { .. } => infer::Type::Unit,
+        hir::Expression::Range { .. } => infer::Type::Integer,
         hir::Expression::Break { .. } => infer::Type::Unit,
         hir::Expression::Continue { .. } => infer::Type::Unit,
         // List expressions - type comes from inference

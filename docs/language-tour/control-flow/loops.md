@@ -100,3 +100,52 @@ while condition1: outer_while {
     }
 }
 ```
+
+# `for`
+
+`for` loops are used to iterate over elements in a list or dictionary. The syntax is as follows:
+
+```toy
+for item in collection {
+    # code to execute for each item in the collection
+}
+```
+
+To iterate over a range of numbers, you can use the slice syntax which returns numbers from `start` to `end - 1`:
+
+```toy
+for item in start..end {
+    # code to execute for each item in the range
+}
+```
+
+You can also use `continue`, `break`, and `return` statements within a `for` loop:
+
+```toy
+for item in collection {
+    if some_condition {
+        continue
+    }
+    if some_other_condition {
+        break
+    }
+    if another_condition {
+        return value
+    }
+}
+```
+
+`for` loops can also have identifiers for better control in nested scenarios:
+
+```toy
+for item in collection: outer_for {
+    for sub_item in item.sub_collection: inner_for {
+        if some_condition {
+            break outer_for
+        }
+        if some_other_condition {
+            break inner_for
+        }
+    }
+}
+```

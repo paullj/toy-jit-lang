@@ -255,6 +255,8 @@ fn get_expr_type(expr: &Expression, hir: &LowerResult, inferred: &InferenceResul
         Expression::Echo { .. } => Type::Unit,
         Expression::Loop { .. } => Type::Unit,
         Expression::While { .. } => Type::Unit,
+        Expression::For { .. } => Type::Unit,
+        Expression::Range { .. } => Type::Integer,
         Expression::Break { .. } => Type::Unit,
         Expression::Continue { .. } => Type::Unit,
         // List expressions - type comes from inference

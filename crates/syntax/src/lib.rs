@@ -71,6 +71,8 @@ pub enum SyntaxKind {
     WhileKeyword,
     BreakKeyword,
     ContinueKeyword,
+    ForKeyword,
+    InKeyword,
 
     // Tokens - Literals
     Identifier,
@@ -104,6 +106,8 @@ pub enum SyntaxKind {
     EchoStatement,
     LoopExpression,
     WhileExpression,
+    ForExpression,
+    RangeExpression,
     BreakStatement,
     ContinueStatement,
 
@@ -192,6 +196,8 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::While => SyntaxKind::WhileKeyword,
             TokenKind::Break => SyntaxKind::BreakKeyword,
             TokenKind::Continue => SyntaxKind::ContinueKeyword,
+            TokenKind::For => SyntaxKind::ForKeyword,
+            TokenKind::In => SyntaxKind::InKeyword,
 
             // Literals
             TokenKind::Identifier => SyntaxKind::Identifier,

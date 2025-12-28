@@ -28,6 +28,8 @@ pub fn token_style(kind: TokenKind) -> Style {
         | TokenKind::Echo
         | TokenKind::Loop
         | TokenKind::While
+        | TokenKind::For
+        | TokenKind::In
         | TokenKind::Break
         | TokenKind::Continue => Style::default().fg(Color::Magenta),
 

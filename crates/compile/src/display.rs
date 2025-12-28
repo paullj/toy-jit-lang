@@ -277,6 +277,11 @@ fn disassemble_inst(code: &[u8], offset: usize, f: &mut fmt::Formatter<'_>) -> f
             let end = code[offset + 4];
             writeln!(f, "list.slice s{} s{} s{} s{}", dst, list, start, end)
         }
+        Opcode::ListLen => {
+            let dst = code[offset + 1];
+            let list = code[offset + 2];
+            writeln!(f, "list.len s{} s{}", dst, list)
+        }
         Opcode::Halt => {
             writeln!(f, "halt")
         }
@@ -323,6 +328,7 @@ fn inst_size(op: Opcode) -> usize {
         Opcode::ListSet => 4,      // op + list + index + value
         Opcode::ListGet => 4,      // op + dst + list + index
         Opcode::ListSlice => 5,    // op + dst + list + start + end
+        Opcode::ListLen => 3,      // op + dst + list
         Opcode::Halt => 1,         // op
     }
 }

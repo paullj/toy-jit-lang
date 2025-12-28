@@ -295,6 +295,18 @@ literal = "continue"
 category = "keyword"
 textmate_scope = "keyword.control.flow.toy"
 
+[[tokens]]
+name = "For"
+literal = "for"
+category = "keyword"
+textmate_scope = "keyword.control.loop.toy"
+
+[[tokens]]
+name = "In"
+literal = "in"
+category = "keyword"
+textmate_scope = "keyword.control.loop.toy"
+
 # Literals
 [[tokens]]
 name = "Identifier"
