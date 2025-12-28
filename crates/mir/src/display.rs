@@ -87,8 +87,8 @@ impl fmt::Display for Inst {
             Inst::StoreCapture { index, src } => {
                 write!(f, "store_capture {} {}", index, src)
             }
-            Inst::Echo { src } => {
-                write!(f, "echo {}", src)
+            Inst::Echo { src, ty } => {
+                write!(f, "echo {:?} {}", ty, src)
             }
 
             // List operations
@@ -118,7 +118,9 @@ impl fmt::Display for Inst {
                     None => write!(f, "_"),
                 }
             }
-
+            Inst::ListLen { dst, list } => {
+                write!(f, "{} = list_len {}", dst, list)
+            }
             // Tuple operations
             Inst::TupleNew { dst, elements } => {
                 write!(f, "{} = tuple_new", dst)?;

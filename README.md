@@ -33,6 +33,7 @@ toy is a simple programming language that is made for fun.
     * not sure if this is a bug yet since we don't have functions yet so ignore
   * hover for variables doesn't show type in blocks
   * infer has some stuff in there which is not related to type inference
+  * string consts not working properly in jit
 
 * improvements
   * rename int to Int, float to Float, bool to Bool, string to String
@@ -41,11 +42,17 @@ toy is a simple programming language that is made for fun.
   * is_bracket_index_not_list() uses speculative (re)lexing to check if [...] contains a comma (ie list) or not (ie index/slice)
     * maybe do this in a cleaner way?
     * feels weird to re lex
+  * i think slices and range expressions are a bit weird and buggy
+    * need to review
+    * they should be the same
+    * they should both produce a slice? type
+    * is this valid 10..9 or error? 10..10?
 
   * tests for runtime vs jit consistency
     * make sure they produce the same results for same inputs
 
 * more helpful warnings
+  * let/var statements are not in this language, omit and use := instead
   * doc comments which are not attached to anything
     * suggest attaching them to the next function/variable definition/doccomment
   * unused variables (naming convention: _varname to ignore warning)

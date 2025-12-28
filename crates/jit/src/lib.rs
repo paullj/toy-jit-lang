@@ -50,11 +50,13 @@ impl Jit {
 
         let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
 
-        // Register runtime helpers for list operations
+        // Register runtime helpers
         builder.symbol("rt_list_new", runtime::rt_list_new as *const u8);
         builder.symbol("rt_list_set", runtime::rt_list_set as *const u8);
         builder.symbol("rt_list_get", runtime::rt_list_get as *const u8);
         builder.symbol("rt_list_slice", runtime::rt_list_slice as *const u8);
+        builder.symbol("rt_list_len", runtime::rt_list_len as *const u8);
+        builder.symbol("rt_echo", runtime::rt_echo as *const u8);
 
         // Register runtime helpers for tuple operations
         builder.symbol("rt_tuple_new", runtime::rt_tuple_new as *const u8);

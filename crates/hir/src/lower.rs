@@ -396,6 +396,8 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
         ast::Expression::If(if_expr) => lower_if(ctx, if_expr),
         ast::Expression::Loop(loop_expr) => lower_loop(ctx, loop_expr),
         ast::Expression::While(while_expr) => lower_while(ctx, while_expr),
+        ast::Expression::For(for_expr) => lower_for(ctx, for_expr),
+        ast::Expression::Range(range_expr) => lower_range(ctx, range_expr),
         ast::Expression::Function(fn_expr) => lower_function_expr(ctx, fn_expr),
         ast::Expression::Call(call) => lower_call(ctx, call),
         ast::Expression::List(list) => lower_list(ctx, list),
@@ -772,6 +774,64 @@ fn lower_while(ctx: &mut Ctx, ast: ast::WhileExpression) -> Expression {
         label,
         body: body_idx,
     }
+}
+
+fn lower_for(ctx: &mut Ctx, ast: ast::ForExpression) -> Expression {
+    let binding = ast
+        .binding()
+        .map(|t| ctx.intern(t.text()))
+        .unwrap_or_else(|| ctx.intern("_"));
+
+    let iterable_ast = ast.iterable();
+    let iterable_span = iterable_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let iterable_expr = lower_expression(ctx, iterable_ast);
+    let iterable = ctx.alloc(iterable_expr, iterable_span);
+
+    let label = ast.label().map(|t| ctx.intern(t.text()));
+
+    ctx.push_loop(label);
+
+    let body_ast = ast.body();
+    let body_span = body_ast
+        .as_ref()
+        .map(|b| b.syntax().text_range())
+        .unwrap_or_default();
+    let body = body_ast
+        .map(|b| lower_block(ctx, b))
+        .unwrap_or(Expression::Missing);
+    let body_idx = ctx.alloc(body, body_span);
+
+    ctx.pop_loop();
+
+    Expression::For {
+        binding,
+        iterable,
+        label,
+        body: body_idx,
+    }
+}
+
+fn lower_range(ctx: &mut Ctx, ast: ast::RangeExpression) -> Expression {
+    let start_ast = ast.start();
+    let start_span = start_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let start_expr = lower_expression(ctx, start_ast);
+    let start = ctx.alloc(start_expr, start_span);
+
+    let end_ast = ast.end();
+    let end_span = end_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let end_expr = lower_expression(ctx, end_ast);
+    let end = ctx.alloc(end_expr, end_span);
+
+    Expression::Range { start, end }
 }
 
 fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {

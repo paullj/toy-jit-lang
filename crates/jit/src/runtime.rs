@@ -116,6 +116,25 @@ pub extern "C" fn rt_list_slice(
     Value::list(new_idx).to_bits()
 }
 
+/// Get list length. Returns length as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_list_len(ctx: *mut RuntimeContext, list_val: i64) -> i64 {
+    let ctx = unsafe { &mut *ctx };
+    let list_idx = Value::from_bits(list_val)
+        .as_list_idx()
+        .expect("rt_list_len: not a list");
+    let list = ctx.heap.get_list(list_idx);
+    list.elements.len() as i64
+}
+
+/// Echo value to stdout. val is NaN-boxed i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_echo(ctx: *mut RuntimeContext, val: i64) {
+    let ctx = unsafe { &*ctx };
+    let value = Value::from_bits(val);
+    println!("{}", value.display_with_interner(&ctx.heap, &ctx.interner));
+}
+
 /// Allocate a new tuple from an array of NaN-boxed elements.
 /// elements_ptr: pointer to array of i64 (NaN-boxed values)
 /// count: number of elements

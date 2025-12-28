@@ -414,7 +414,8 @@ impl<'a> Compiler<'a> {
                 let src_slot = self.load_operand(src);
                 self.writer.emit_store_capture(*index as u8, src_slot);
             }
-            Inst::Echo { src } => {
+            Inst::Echo { src, ty: _ } => {
+                // VM already uses NaN-boxed values, ignore type
                 let src_slot = self.load_operand(src);
                 self.writer.emit_echo(src_slot);
             }
@@ -463,6 +464,11 @@ impl<'a> Compiler<'a> {
                 let dst_slot = self.vreg_to_physical(*dst);
                 self.writer
                     .emit_list_slice(dst_slot, list_slot, start_slot, end_slot);
+            }
+            Inst::ListLen { dst, list } => {
+                let list_slot = self.load_operand(list);
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.writer.emit_list_len(dst_slot, list_slot);
             }
 
             // Tuple operations

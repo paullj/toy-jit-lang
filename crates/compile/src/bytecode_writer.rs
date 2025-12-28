@@ -367,6 +367,13 @@ impl BytecodeWriter {
         self.write_u8(end);
     }
 
+    /// ListLen: dst:u8, list:u8
+    pub fn emit_list_len(&mut self, dst: u8, list: u8) {
+        self.emit_op(Opcode::ListLen);
+        self.write_u8(dst);
+        self.write_u8(list);
+    }
+
     // === Tuple operations ===
 
     /// TupleNew: dst:u8, elem_base:u8, elem_count:u8

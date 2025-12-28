@@ -65,18 +65,19 @@ pub enum Opcode {
     // I/O (1)
     Echo = 38, // src:u8
 
-    // List operations (4)
+    // List operations (5)
     ListNew = 39,   // dst:u8, capacity:u8
     ListSet = 40,   // list:u8, index:u8, value:u8
     ListGet = 41,   // dst:u8, list:u8, index:u8
     ListSlice = 42, // dst:u8, list:u8, start:u8, end:u8
+    ListLen = 43,   // dst:u8, list:u8
 
     // Tuple operations (2)
-    TupleNew = 43, // dst:u8, elem_base:u8, elem_count:u8
-    TupleGet = 44, // dst:u8, tuple:u8, index:u8
+    TupleNew = 44, // dst:u8, elem_base:u8, elem_count:u8
+    TupleGet = 45, // dst:u8, tuple:u8, index:u8
 
     // End (1)
-    Halt = 45,
+    Halt = 46,
 }
 
 impl Opcode {

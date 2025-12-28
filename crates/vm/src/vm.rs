@@ -665,7 +665,14 @@ impl<'a> Vm<'a> {
                     let result = Value::list(new_list_idx);
                     self.set(base, dst, result);
                 }
-
+                Opcode::ListLen => {
+                    let dst = reader.read_u8();
+                    let list = reader.read_u8();
+                    let list_idx = self.get_list_idx(base, list);
+                    let list_data = self.heap.get_list(list_idx);
+                    let len = list_data.elements.len() as i64;
+                    self.set(base, dst, Value::int(len));
+                }
                 // Tuple operations
                 Opcode::TupleNew => {
                     let dst = reader.read_u8();
@@ -692,7 +699,6 @@ impl<'a> Vm<'a> {
                     let result = tuple_data.elements[index as usize];
                     self.set(base, dst, result);
                 }
-
                 // End
                 Opcode::Halt => {
                     return Ok((Value::unit(), self.heap));

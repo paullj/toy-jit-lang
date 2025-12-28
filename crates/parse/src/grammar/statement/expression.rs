@@ -65,7 +65,8 @@ pub(crate) const EXPR_FIRST: TokenSet = LITERAL_SET
     .union(TokenSet::single(TokenKind::If))
     .union(TokenSet::single(TokenKind::Fn))
     .union(TokenSet::single(TokenKind::Loop))
-    .union(TokenSet::single(TokenKind::While));
+    .union(TokenSet::single(TokenKind::While))
+    .union(TokenSet::single(TokenKind::For));
 
 /// Recovery set for expression parsing (skip to newline or expr start)
 const EXPR_RECOVERY: TokenSet = EXPR_FIRST.union(TokenSet::single(TokenKind::NewLine));
@@ -204,6 +205,7 @@ fn lhs(p: &mut Parser) -> Option<CompletedMarker> {
         Some(TokenKind::Fn) => Some(crate::grammar::function_definition_or_expression(p)),
         Some(TokenKind::Loop) => Some(loop_expression(p)),
         Some(TokenKind::While) => Some(while_expression(p)),
+        Some(TokenKind::For) => Some(for_expression(p)),
         _ => {
             p.recover("expected expression", EXPR_RECOVERY);
             None
@@ -442,6 +444,86 @@ fn while_expression(p: &mut Parser) -> CompletedMarker {
     block_expression(p);
 
     m.complete(p, SyntaxKind::WhileExpression)
+}
+
+/// Parses for expression: `for item in collection { ... }` or `for item in start..end { ... }`
+fn for_expression(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::For));
+    let m = p.start();
+    p.consume(); // eat 'for'
+
+    // Parse binding identifier
+    if !p.eat(TokenKind::Identifier) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "identifier".to_string(),
+            found,
+        });
+    }
+
+    // Expect 'in'
+    if !p.eat(TokenKind::In) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "'in'".to_string(),
+            found,
+        });
+    }
+
+    // Parse iterable (expression or range)
+    // First parse the start expression, then check for '..' for range
+    range_or_expression(p);
+
+    // Optional label
+    if p.at(TokenKind::Colon) {
+        p.consume();
+        if !p.eat(TokenKind::Identifier) {
+            let span = p.current_span();
+            let found = p.current().map(|k| k.to_string());
+            p.error(crate::ParseError::UnexpectedToken {
+                at: span.into(),
+                expected: "label identifier".to_string(),
+                found,
+            });
+        }
+    }
+
+    // Expect block
+    if !p.at(TokenKind::LeftBrace) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "'{'".to_string(),
+            found,
+        });
+    }
+    block_expression(p);
+
+    m.complete(p, SyntaxKind::ForExpression)
+}
+
+/// Parses a range expression or regular expression for 'for' loops.
+/// If `..` is found after the first expression, wraps both in a RangeExpression.
+/// Otherwise just parses the expression (it becomes a child of ForExpression directly).
+fn range_or_expression(p: &mut Parser) {
+    // Try to parse the start expression
+    let Some(start) = expression(p) else {
+        return;
+    };
+
+    // Check for '..' to make it a range
+    if p.at(TokenKind::DotDot) {
+        let m = start.precede(p);
+        p.consume(); // eat '..'
+        expression(p); // end expression
+        m.complete(p, SyntaxKind::RangeExpression);
+    }
+    // Otherwise, the expression was already parsed and will be a direct child
 }
 
 /// Parses list literal: `[expr, expr, ...]`
