@@ -92,7 +92,7 @@ fn expression_with_binding_power(p: &mut Parser, min_bp: u8) -> Option<Completed
         } else if p.at(TokenKind::LeftBracket) {
             lhs = index_or_slice_expression(p, lhs);
         } else if p.at(TokenKind::Dot) {
-            lhs = tuple_access_expression(p, lhs);
+            lhs = tuple_or_field_access_expression(p, lhs);
         } else {
             break;
         }
@@ -196,7 +196,15 @@ pub(crate) fn inner_expression_with_binding_power(
 fn lhs(p: &mut Parser) -> Option<CompletedMarker> {
     match p.current() {
         Some(k) if LITERAL_SET.contains(k) => Some(literal(p)),
-        Some(TokenKind::Identifier) => Some(variable_reference(p)),
+        Some(TokenKind::Identifier) => {
+            // Check if this is a struct literal: Name { ... }
+            // vs just a variable reference
+            if p.peek_at(1, TokenKind::LeftBrace) && !p.at_newline_terminator() {
+                Some(struct_expression(p))
+            } else {
+                Some(variable_reference(p))
+            }
+        }
         Some(TokenKind::Minus) | Some(TokenKind::Bang) => prefix_expression(p),
         Some(TokenKind::LeftParenthesis) => Some(parenthesis_expression(p)),
         Some(TokenKind::LeftBrace) => Some(block_expression(p)),
@@ -526,6 +534,84 @@ fn range_or_expression(p: &mut Parser) {
     // Otherwise, the expression was already parsed and will be a direct child
 }
 
+/// Parses struct literal: `Name { field: value, ... }` or `Name { field, ... }` (shorthand)
+/// Also supports spread: `Name { ..other, field: value }`
+fn struct_expression(p: &mut Parser) -> CompletedMarker {
+    debug_assert!(p.at(TokenKind::Identifier));
+
+    let m = p.start();
+    p.consume(); // eat struct name
+
+    debug_assert!(p.at(TokenKind::LeftBrace));
+    p.consume(); // eat '{'
+    p.enter_delimiter();
+
+    while !p.at(TokenKind::RightBrace) && !p.is_at_end() {
+        // Skip newlines
+        while p.eat(TokenKind::NewLine) {}
+
+        if p.at(TokenKind::RightBrace) {
+            break;
+        }
+
+        // Check for spread: `..other`
+        if p.at(TokenKind::DotDot) {
+            p.consume(); // eat '..'
+            expression(p); // spread expression
+        } else {
+            // Parse field initializer
+            struct_field_init(p);
+        }
+
+        // Allow comma or newline as separator
+        if !p.at(TokenKind::RightBrace)
+            && !p.eat(TokenKind::Comma)
+            && !p.eat(TokenKind::NewLine)
+            && !p.at(TokenKind::RightBrace)
+        {
+            break;
+        }
+    }
+
+    p.exit_delimiter();
+    if !p.eat(TokenKind::RightBrace) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "'}'".to_string(),
+            found,
+        });
+    }
+
+    m.complete(p, SyntaxKind::StructExpression)
+}
+
+/// Parses a struct field initializer: `field: value` or `field` (shorthand)
+fn struct_field_init(p: &mut Parser) -> CompletedMarker {
+    let m = p.start();
+
+    // Field name
+    if !p.eat(TokenKind::Identifier) {
+        let span = p.current_span();
+        let found = p.current().map(|k| k.to_string());
+        p.error(crate::ParseError::UnexpectedToken {
+            at: span.into(),
+            expected: "field name".to_string(),
+            found,
+        });
+        return m.complete(p, SyntaxKind::StructFieldInit);
+    }
+
+    // Check for `: value` (explicit) or just `field` (shorthand)
+    if p.eat(TokenKind::Colon) {
+        expression(p);
+    }
+    // If no colon, field name is also the value (shorthand syntax)
+
+    m.complete(p, SyntaxKind::StructFieldInit)
+}
+
 /// Parses list literal: `[expr, expr, ...]`
 fn list_expression(p: &mut Parser) -> CompletedMarker {
     debug_assert!(p.at(TokenKind::LeftBracket));
@@ -564,26 +650,31 @@ fn list_expression(p: &mut Parser) -> CompletedMarker {
 }
 
 /// Parses tuple field access: `expr.0`, `expr.1`, etc.
-fn tuple_access_expression(p: &mut Parser, tuple: CompletedMarker) -> CompletedMarker {
+/// Or struct field access: `expr.field`
+fn tuple_or_field_access_expression(p: &mut Parser, expr: CompletedMarker) -> CompletedMarker {
     debug_assert!(p.at(TokenKind::Dot));
 
-    let m = tuple.precede(p);
+    let m = expr.precede(p);
     p.consume(); // eat '.'
 
-    // Expect an integer literal for tuple index
-    if !p.at(TokenKind::Integer) {
+    if p.at(TokenKind::Integer) {
+        // Tuple access: expr.0
+        p.consume();
+        m.complete(p, SyntaxKind::TupleAccessExpression)
+    } else if p.at(TokenKind::Identifier) {
+        // Field access: expr.field
+        p.consume();
+        m.complete(p, SyntaxKind::FieldAccessExpression)
+    } else {
         let span = p.current_span();
         let found = p.current().map(|k| k.to_string());
         p.error(crate::ParseError::UnexpectedToken {
             at: span.into(),
-            expected: "tuple index (integer)".to_string(),
+            expected: "field name or tuple index".to_string(),
             found,
         });
-    } else {
-        p.consume(); // eat integer
+        m.complete(p, SyntaxKind::FieldAccessExpression)
     }
-
-    m.complete(p, SyntaxKind::TupleAccessExpression)
 }
 
 /// Parses index or slice: `expr[idx]` or `expr[start..end]`

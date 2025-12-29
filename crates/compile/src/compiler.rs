@@ -67,6 +67,7 @@ pub fn compile(mir: &Module) -> CompiledModule {
         chunks,
         main_idx: mir.main_id.0 as usize,
         strings,
+        struct_metadata: mir.struct_metadata.clone(),
     }
 }
 
@@ -487,6 +488,44 @@ impl<'a> Compiler<'a> {
                 self.writer
                     .emit_tuple_get(dst_slot, tuple_slot, *index as u8);
             }
+            Inst::StructNew {
+                dst,
+                struct_id,
+                fields,
+            } => {
+                // Place fields in consecutive slots (like tuple)
+                let field_base = self.next_slot;
+                for (i, field) in fields.iter().enumerate() {
+                    self.load_operand_to(field, field_base + i as u8);
+                }
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.writer.emit_struct_new(
+                    dst_slot,
+                    *struct_id as u16,
+                    field_base,
+                    fields.len() as u8,
+                );
+            }
+            Inst::StructGet {
+                dst,
+                struct_ref,
+                field_index,
+            } => {
+                let struct_slot = self.load_operand(struct_ref);
+                let dst_slot = self.vreg_to_physical(*dst);
+                self.writer
+                    .emit_struct_get(dst_slot, struct_slot, *field_index as u8);
+            }
+            Inst::StructSet {
+                struct_ref,
+                field_index,
+                value,
+            } => {
+                let struct_slot = self.load_operand(struct_ref);
+                let value_slot = self.load_operand(value);
+                self.writer
+                    .emit_struct_set(struct_slot, *field_index as u8, value_slot);
+            }
         }
     }
 
@@ -576,6 +615,7 @@ mod tests {
         let module = Module {
             functions: vec![func],
             main_id: FuncId(0),
+            struct_metadata: vec![],
         };
         let compiled = compile(&module);
 

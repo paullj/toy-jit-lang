@@ -22,6 +22,11 @@ impl RuntimeContext {
         }
     }
 
+    /// Register struct metadata for display purposes
+    pub fn register_struct_meta(&mut self, struct_id: u32, name: String, field_names: Vec<String>) {
+        self.heap.register_struct_meta(struct_id, name, field_names);
+    }
+
     pub fn take_heap(self) -> Heap {
         self.heap
     }
@@ -175,4 +180,77 @@ pub extern "C" fn rt_tuple_get(ctx: *mut RuntimeContext, tuple_val: i64, index: 
     }
 
     tuple.elements[index as usize].to_bits()
+}
+
+/// Allocate a new struct from an array of NaN-boxed fields.
+/// struct_id: identifier for the struct type
+/// fields_ptr: pointer to array of i64 (NaN-boxed values)
+/// count: number of fields
+/// Returns NaN-boxed struct Value as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_struct_new(
+    ctx: *mut RuntimeContext,
+    struct_id: i64,
+    fields_ptr: *const i64,
+    count: i64,
+) -> i64 {
+    let ctx = unsafe { &mut *ctx };
+    let fields: Vec<Value> = (0..count as usize)
+        .map(|i| {
+            let bits = unsafe { *fields_ptr.add(i) };
+            Value::from_bits(bits)
+        })
+        .collect();
+
+    let idx = ctx.heap.alloc_struct(struct_id as u32, fields);
+    Value::struct_obj(idx).to_bits()
+}
+
+/// Get struct field by index. Returns NaN-boxed Value as i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_struct_get(
+    ctx: *mut RuntimeContext,
+    struct_val: i64,
+    field_index: i64,
+) -> i64 {
+    let ctx = unsafe { &*ctx };
+    let struct_idx = Value::from_bits(struct_val)
+        .as_struct_idx()
+        .expect("rt_struct_get: not a struct");
+    let struct_data = ctx.heap.get_struct(struct_idx);
+
+    if field_index < 0 || field_index >= struct_data.fields.len() as i64 {
+        panic!(
+            "struct field index out of bounds: {} (len {})",
+            field_index,
+            struct_data.fields.len()
+        );
+    }
+
+    struct_data.fields[field_index as usize].to_bits()
+}
+
+/// Set struct field by index. struct_val, value are NaN-boxed i64.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_struct_set(
+    ctx: *mut RuntimeContext,
+    struct_val: i64,
+    field_index: i64,
+    value: i64,
+) {
+    let ctx = unsafe { &mut *ctx };
+    let struct_idx = Value::from_bits(struct_val)
+        .as_struct_idx()
+        .expect("rt_struct_set: not a struct");
+    let struct_data = ctx.heap.get_struct_mut(struct_idx);
+
+    if field_index < 0 || field_index >= struct_data.fields.len() as i64 {
+        panic!(
+            "struct field index out of bounds: {} (len {})",
+            field_index,
+            struct_data.fields.len()
+        );
+    }
+
+    struct_data.fields[field_index as usize] = Value::from_bits(value);
 }

@@ -105,6 +105,15 @@ impl Runtime {
         // Create runtime context for heap access during list operations
         let mut context = jit::RuntimeContext::new(lasso::Rodeo::default());
 
+        // Register struct metadata for display purposes
+        for meta in &mir_module.struct_metadata {
+            context.register_struct_meta(
+                meta.struct_id,
+                meta.name.clone(),
+                meta.field_names.clone(),
+            );
+        }
+
         // Call main with context pointer
         // Note: JIT returns raw values for primitives, NaN-boxed for heap objects
         let raw_result: i64 = unsafe {
@@ -184,6 +193,8 @@ fn get_item_type(item: &Item, hir: &LowerResult, inferred: &InferenceResult) -> 
             .cloned()
             .unwrap_or(Type::Integer),
         Item::IndexAssignment { .. } => Type::Unit,
+        Item::StructDefinition(_) => Type::Unit,
+        Item::FieldAssignment { .. } => Type::Unit,
         Item::Expression(expr) => get_expr_type(expr, hir, inferred),
     }
 }
@@ -263,5 +274,7 @@ fn get_expr_type(expr: &Expression, hir: &LowerResult, inferred: &InferenceResul
         Expression::List { .. } | Expression::Index { .. } | Expression::Slice { .. } => Type::Unit,
         // Tuple expressions - type comes from inference
         Expression::Tuple { .. } | Expression::TupleAccess { .. } => Type::Unit,
+        // Struct expressions - type comes from inference
+        Expression::Struct { .. } | Expression::FieldAccess { .. } => Type::Unit,
     }
 }

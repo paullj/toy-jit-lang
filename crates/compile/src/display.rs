@@ -297,6 +297,29 @@ fn disassemble_inst(code: &[u8], offset: usize, f: &mut fmt::Formatter<'_>) -> f
         Opcode::Halt => {
             writeln!(f, "halt")
         }
+        Opcode::StructNew => {
+            let dst = code[offset + 1];
+            let struct_id = u16::from_le_bytes([code[offset + 2], code[offset + 3]]);
+            let field_base = code[offset + 4];
+            let field_count = code[offset + 5];
+            writeln!(
+                f,
+                "struct.new s{} #{} s{} {}",
+                dst, struct_id, field_base, field_count
+            )
+        }
+        Opcode::StructGet => {
+            let dst = code[offset + 1];
+            let struct_ref = code[offset + 2];
+            let field_index = code[offset + 3];
+            writeln!(f, "struct.get s{} s{} .{}", dst, struct_ref, field_index)
+        }
+        Opcode::StructSet => {
+            let struct_ref = code[offset + 1];
+            let field_index = code[offset + 2];
+            let value = code[offset + 3];
+            writeln!(f, "struct.set s{} .{} s{}", struct_ref, field_index, value)
+        }
     }
 }
 
@@ -343,6 +366,9 @@ fn inst_size(op: Opcode) -> usize {
         Opcode::ListLen => 3,      // op + dst + list
         Opcode::TupleNew => 4,     // op + dst + elem_base + elem_count
         Opcode::TupleGet => 4,     // op + dst + tuple + index
+        Opcode::StructNew => 6,    // op + dst + struct_id:u16 + field_base + field_count
+        Opcode::StructGet => 4,    // op + dst + struct + field_index
+        Opcode::StructSet => 4,    // op + struct + field_index + value
         Opcode::Halt => 1,         // op
     }
 }

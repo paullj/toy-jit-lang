@@ -16,9 +16,11 @@ impl Root {
 #[derive(Debug)]
 pub enum Item {
     FunctionDefinition(FunctionDefinition),
+    StructDefinition(StructDefinition),
     VariableDefinition(VariableDefinition),
     VariableAssignment(VariableAssignment),
     IndexAssignment(IndexAssignment),
+    FieldAssignment(FieldAssignment),
     ReturnStatement(ReturnStatement),
     EchoStatement(EchoStatement),
     BreakStatement(BreakStatement),
@@ -30,9 +32,11 @@ impl Item {
     pub fn cast(node: SyntaxNode) -> Option<Item> {
         let result = match node.kind() {
             SyntaxKind::FunctionDefinition => Self::FunctionDefinition(FunctionDefinition(node)),
+            SyntaxKind::StructDefinition => Self::StructDefinition(StructDefinition(node)),
             SyntaxKind::VariableDefinition => Self::VariableDefinition(VariableDefinition(node)),
             SyntaxKind::VariableAssignment => Self::VariableAssignment(VariableAssignment(node)),
             SyntaxKind::IndexAssignment => Self::IndexAssignment(IndexAssignment(node)),
+            SyntaxKind::FieldAssignment => Self::FieldAssignment(FieldAssignment(node)),
             SyntaxKind::ReturnStatement => Self::ReturnStatement(ReturnStatement(node)),
             SyntaxKind::EchoStatement => Self::EchoStatement(EchoStatement(node)),
             SyntaxKind::BreakStatement => Self::BreakStatement(BreakStatement(node)),
@@ -45,9 +49,11 @@ impl Item {
     pub fn syntax(&self) -> &SyntaxNode {
         match self {
             Item::FunctionDefinition(n) => n.syntax(),
+            Item::StructDefinition(n) => n.syntax(),
             Item::VariableDefinition(n) => n.syntax(),
             Item::VariableAssignment(n) => n.syntax(),
             Item::IndexAssignment(n) => n.syntax(),
+            Item::FieldAssignment(n) => n.syntax(),
             Item::ReturnStatement(n) => n.syntax(),
             Item::EchoStatement(n) => n.syntax(),
             Item::BreakStatement(n) => n.syntax(),
@@ -107,6 +113,8 @@ pub enum Expression {
     Slice(SliceExpression),
     Tuple(TupleExpression),
     TupleAccess(TupleAccessExpression),
+    Struct(StructExpression),
+    FieldAccess(FieldAccessExpression),
 }
 
 impl Expression {
@@ -130,6 +138,8 @@ impl Expression {
             SyntaxKind::SliceExpression => Self::Slice(SliceExpression(node)),
             SyntaxKind::TupleExpression => Self::Tuple(TupleExpression(node)),
             SyntaxKind::TupleAccessExpression => Self::TupleAccess(TupleAccessExpression(node)),
+            SyntaxKind::StructExpression => Self::Struct(StructExpression(node)),
+            SyntaxKind::FieldAccessExpression => Self::FieldAccess(FieldAccessExpression(node)),
             _ => return None,
         };
         Some(result)
@@ -155,6 +165,8 @@ impl Expression {
             Expression::Slice(n) => n.syntax(),
             Expression::Tuple(n) => n.syntax(),
             Expression::TupleAccess(n) => n.syntax(),
+            Expression::Struct(n) => n.syntax(),
+            Expression::FieldAccess(n) => n.syntax(),
         }
     }
 }
@@ -776,6 +788,124 @@ impl TupleAccessExpression {
             .filter_map(SyntaxElement::into_token)
             .find(|token| token.kind() == SyntaxKind::Integer)
             .and_then(|token| token.text().parse().ok())
+    }
+}
+
+// ========================================
+// Struct definitions and expressions
+// ========================================
+
+ast_node!(StructDefinition, SyntaxKind::StructDefinition);
+
+impl StructDefinition {
+    /// The struct name (e.g., `Point` in `struct Point { ... }`)
+    pub fn name(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+
+    /// Iterator over field definitions
+    pub fn fields(&self) -> impl Iterator<Item = StructFieldDef> {
+        self.0.children().filter_map(StructFieldDef::cast)
+    }
+}
+
+ast_node!(StructFieldDef, SyntaxKind::StructFieldDef);
+
+impl StructFieldDef {
+    /// The field name
+    pub fn name(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+
+    /// The field type (second identifier after colon)
+    pub fn type_name(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .filter(|token| token.kind() == SyntaxKind::Identifier)
+            .nth(1)
+    }
+}
+
+ast_node!(StructExpression, SyntaxKind::StructExpression);
+
+impl StructExpression {
+    /// The struct type name (e.g., `Point` in `Point { x: 1, y: 2 }`)
+    pub fn name(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+
+    /// Iterator over field initializers
+    pub fn fields(&self) -> impl Iterator<Item = StructFieldInit> {
+        self.0.children().filter_map(StructFieldInit::cast)
+    }
+
+    /// Get the spread expression (..other) if present
+    pub fn spread(&self) -> Option<Expression> {
+        // Spread is an expression that appears after `..` in the struct literal
+        // The parser puts the spread expression as a direct child
+        self.0
+            .children()
+            .filter(|n| n.kind() != SyntaxKind::StructFieldInit)
+            .find_map(Expression::cast)
+    }
+}
+
+ast_node!(StructFieldInit, SyntaxKind::StructFieldInit);
+
+impl StructFieldInit {
+    /// The field name
+    pub fn name(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .find(|token| token.kind() == SyntaxKind::Identifier)
+    }
+
+    /// The field value expression (None if using shorthand syntax)
+    pub fn value(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+}
+
+ast_node!(FieldAccessExpression, SyntaxKind::FieldAccessExpression);
+
+impl FieldAccessExpression {
+    /// The object being accessed (e.g., `point` in `point.x`)
+    pub fn object(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// The field name being accessed (e.g., `x` in `point.x`)
+    pub fn field(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(SyntaxElement::into_token)
+            .filter(|token| token.kind() == SyntaxKind::Identifier)
+            .last() // Field name is after the dot, so it's the last identifier
+    }
+}
+
+ast_node!(FieldAssignment, SyntaxKind::FieldAssignment);
+
+impl FieldAssignment {
+    /// Get the target field access expression
+    pub fn target(&self) -> Option<Expression> {
+        self.0.children().find_map(Expression::cast)
+    }
+
+    /// Get the value being assigned
+    pub fn value(&self) -> Option<Expression> {
+        self.0.children().filter_map(Expression::cast).nth(1)
     }
 }
 

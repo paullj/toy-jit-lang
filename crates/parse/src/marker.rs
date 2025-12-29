@@ -28,16 +28,21 @@ impl Marker {
 
         parser.events.push(Event::FinishNode);
 
-        CompletedMarker { at: self.at }
+        CompletedMarker::new(self.at, kind)
     }
 }
 
 /// A marker that has been completed and can create preceding nodes
 pub(crate) struct CompletedMarker {
     at: usize,
+    kind: SyntaxKind,
 }
 
 impl CompletedMarker {
+    pub(crate) fn new(at: usize, kind: SyntaxKind) -> Self {
+        Self { at, kind }
+    }
+
     /// Creates a new marker that wraps this completed node
     pub(crate) fn precede(self, parser: &mut Parser) -> Marker {
         let new_marker = parser.start();
@@ -50,5 +55,10 @@ impl CompletedMarker {
         }
 
         new_marker
+    }
+
+    /// Returns the syntax kind of this completed marker
+    pub(crate) fn kind(&self) -> SyntaxKind {
+        self.kind
     }
 }

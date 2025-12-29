@@ -33,8 +33,8 @@ pub fn token_style(kind: TokenKind) -> Style {
         | TokenKind::Break
         | TokenKind::Continue => Style::default().fg(Color::Magenta),
 
-        // Function keywords
-        TokenKind::Fn => Style::default().fg(Color::Blue),
+        // Function and struct keywords
+        TokenKind::Fn | TokenKind::Struct => Style::default().fg(Color::Blue),
 
         // Operators
         TokenKind::Plus

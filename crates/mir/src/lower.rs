@@ -4,7 +4,8 @@ use hir::{BlockItem, Definition, ExprIdx, Expression, Ident, InfixOp, Item, Lite
 use infer::{InferenceResult, Type};
 
 use crate::ir::{
-    Block, BlockId, CapturedVar, FuncId, Function, Inst, LocalId, Module, Operand, VReg, ValueType,
+    Block, BlockId, CapturedVar, FuncId, Function, Inst, LocalId, Module, Operand, StructMeta,
+    VReg, ValueType,
 };
 
 pub fn lower(hir: &hir::LowerResult, types: &InferenceResult) -> Module {
@@ -31,6 +32,15 @@ struct SavedContext {
     local_scopes: Vec<HashMap<String, LocalId>>,
     capture_map: HashMap<String, u32>,
     loop_stack: Vec<LoopContext>,
+}
+
+/// Struct definition info
+#[derive(Clone)]
+struct StructDef {
+    id: u32,
+    #[allow(dead_code)]
+    field_count: u32,
+    field_names: Vec<String>,
 }
 
 struct LowerCtx<'a> {
@@ -60,6 +70,10 @@ struct LowerCtx<'a> {
 
     // Loop context stack for break/continue
     loop_stack: Vec<LoopContext>,
+
+    // Struct registry
+    struct_defs: HashMap<String, StructDef>,
+    next_struct_id: u32,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -78,6 +92,8 @@ impl<'a> LowerCtx<'a> {
             next_func_id: 0,
             func_names: HashMap::new(),
             capture_map: HashMap::new(),
+            struct_defs: HashMap::new(),
+            next_struct_id: 0,
             loop_stack: Vec::new(),
         }
     }
@@ -196,6 +212,60 @@ impl<'a> LowerCtx<'a> {
         self.current_block.push(inst);
     }
 
+    /// Register a struct definition and return its ID
+    fn register_struct(&mut self, name: &str, field_count: u32) -> u32 {
+        if let Some(def) = self.struct_defs.get(name) {
+            return def.id;
+        }
+        let id = self.next_struct_id;
+        self.next_struct_id += 1;
+        self.struct_defs.insert(
+            name.to_string(),
+            StructDef {
+                id,
+                field_count,
+                field_names: Vec::new(),
+            },
+        );
+        id
+    }
+
+    /// Register a struct with field names
+    fn register_struct_with_fields(&mut self, name: &str, fields: Vec<String>) -> u32 {
+        if let Some(def) = self.struct_defs.get(name) {
+            return def.id;
+        }
+        let id = self.next_struct_id;
+        self.next_struct_id += 1;
+        let field_count = fields.len() as u32;
+        self.struct_defs.insert(
+            name.to_string(),
+            StructDef {
+                id,
+                field_count,
+                field_names: fields,
+            },
+        );
+        id
+    }
+
+    /// Get struct ID by name
+    fn get_struct_id(&self, name: &str) -> Option<u32> {
+        self.struct_defs.get(name).map(|def| def.id)
+    }
+
+    /// Get field index by field name - searches all struct definitions
+    fn get_field_index(&self, field_name: &str) -> u32 {
+        // Search all structs for the field name and return its index
+        for struct_def in self.struct_defs.values() {
+            if let Some(idx) = struct_def.field_names.iter().position(|n| n == field_name) {
+                return idx as u32;
+            }
+        }
+        // Field not found - this shouldn't happen with type-checked code
+        panic!("field '{}' not found in any struct", field_name);
+    }
+
     fn lower_module(&mut self) {
         // First pass: register all top-level functions so we know their FuncIds
         for item in &self.hir.items {
@@ -285,6 +355,46 @@ impl<'a> LowerCtx<'a> {
                     self.emit(Inst::ListSet {
                         list,
                         index: idx,
+                        value: val,
+                    });
+                    last_expr_value = None;
+                }
+                Item::StructDefinition(struct_def) => {
+                    // Register struct definition - store struct name to ID mapping with field names
+                    let name_str = self.resolve(struct_def.name).to_string();
+                    let field_names: Vec<String> = struct_def
+                        .fields
+                        .iter()
+                        .map(|f| self.resolve(f.name).to_string())
+                        .collect();
+                    let struct_id = self.register_struct_with_fields(&name_str, field_names);
+                    // Store in scope so struct literals can find it
+                    let local = self.alloc_local(&name_str);
+                    let dst = self.fresh_vreg();
+                    // Store the struct_id as an int constant for later use
+                    self.emit(Inst::Copy {
+                        dst,
+                        src: Operand::IntConst(struct_id as i64),
+                    });
+                    self.emit(Inst::StoreLocal {
+                        local,
+                        src: Operand::VReg(dst),
+                    });
+                    last_expr_value = None;
+                }
+                Item::FieldAssignment {
+                    object,
+                    field,
+                    value,
+                } => {
+                    let obj = self.lower_expr_idx(*object);
+                    let val = self.lower_expr(value);
+                    // Get field index from struct (for now use hash of field name)
+                    let field_name = self.resolve(*field).to_string();
+                    let field_index = self.get_field_index(&field_name);
+                    self.emit(Inst::StructSet {
+                        struct_ref: obj,
+                        field_index,
                         value: val,
                     });
                     last_expr_value = None;
@@ -600,7 +710,85 @@ impl<'a> LowerCtx<'a> {
             } => self.lower_slice(*collection, *start, *end),
             Expression::Tuple { elements } => self.lower_tuple(elements),
             Expression::TupleAccess { tuple, index } => self.lower_tuple_access(*tuple, *index),
+            Expression::Struct {
+                name,
+                fields,
+                spread,
+            } => self.lower_struct(*name, fields, *spread),
+            Expression::FieldAccess { object, field } => self.lower_field_access(*object, *field),
         }
+    }
+
+    fn lower_struct(
+        &mut self,
+        name: Ident,
+        fields: &[(Ident, ExprIdx)],
+        spread: Option<ExprIdx>,
+    ) -> Operand {
+        let name_str = self.resolve(name).to_string();
+
+        // Get or register struct ID
+        let struct_id = self
+            .get_struct_id(&name_str)
+            .unwrap_or_else(|| self.register_struct(&name_str, fields.len() as u32));
+
+        // Build a map of explicitly provided fields
+        let mut provided_fields: HashMap<String, ExprIdx> = fields
+            .iter()
+            .map(|(ident, expr)| (self.resolve(*ident).to_string(), *expr))
+            .collect();
+
+        // Get all field names from struct definition
+        let all_field_names: Vec<String> = self
+            .struct_defs
+            .get(&name_str)
+            .map(|def| def.field_names.clone())
+            .unwrap_or_default();
+
+        // Lower spread expression if present
+        let spread_operand = spread.map(|expr| self.lower_expr_idx(expr));
+
+        // Build field operands in the correct order
+        let mut field_operands = Vec::new();
+        for (idx, field_name) in all_field_names.iter().enumerate() {
+            if let Some(expr_idx) = provided_fields.remove(field_name) {
+                // Field explicitly provided
+                field_operands.push(self.lower_expr_idx(expr_idx));
+            } else if let Some(ref spread_op) = spread_operand {
+                // Get field from spread struct
+                let dst = self.fresh_vreg();
+                self.emit(Inst::StructGet {
+                    dst,
+                    struct_ref: spread_op.clone(),
+                    field_index: idx as u32,
+                });
+                field_operands.push(Operand::VReg(dst));
+            }
+            // If neither provided nor spread, field will be missing (type checker should catch this)
+        }
+
+        // Create the struct
+        let dst = self.fresh_vreg();
+        self.emit(Inst::StructNew {
+            dst,
+            struct_id,
+            fields: field_operands,
+        });
+        Operand::VReg(dst)
+    }
+
+    fn lower_field_access(&mut self, object: ExprIdx, field: Ident) -> Operand {
+        let obj = self.lower_expr_idx(object);
+        let field_name = self.resolve(field).to_string();
+        let field_index = self.get_field_index(&field_name);
+
+        let dst = self.fresh_vreg();
+        self.emit(Inst::StructGet {
+            dst,
+            struct_ref: obj,
+            field_index,
+        });
+        Operand::VReg(dst)
     }
 
     fn lower_var_ref(&mut self, name: &str) -> Operand {
@@ -825,6 +1013,21 @@ impl<'a> LowerCtx<'a> {
                         let target = ctx.continue_bb;
                         self.emit(Inst::Jump { target });
                     }
+                }
+                BlockItem::FieldAssignment {
+                    object,
+                    field,
+                    value,
+                } => {
+                    let obj = self.lower_expr_idx(*object);
+                    let val = self.lower_expr_idx(*value);
+                    let field_name = self.resolve(*field).to_string();
+                    let field_index = self.get_field_index(&field_name);
+                    self.emit(Inst::StructSet {
+                        struct_ref: obj,
+                        field_index,
+                        value: val,
+                    });
                 }
             }
         }
@@ -1323,7 +1526,22 @@ impl<'a> LowerCtx<'a> {
             .map(|f| f.id)
             .unwrap_or(FuncId(functions.len() as u32 - 1));
 
-        Module { functions, main_id }
+        // Collect struct metadata for display
+        let struct_metadata: Vec<StructMeta> = self
+            .struct_defs
+            .into_iter()
+            .map(|(name, def)| StructMeta {
+                struct_id: def.id,
+                name,
+                field_names: def.field_names,
+            })
+            .collect();
+
+        Module {
+            functions,
+            main_id,
+            struct_metadata,
+        }
     }
 }
 

@@ -8,7 +8,7 @@ use crate::ops;
 use crate::scheme::Scheme;
 use crate::subst::Subst;
 use crate::suggest::find_similar;
-use crate::types::{Type, TypeVar};
+use crate::types::{StructId, Type, TypeVar};
 use crate::unify::{UnifyError, unify};
 use crate::{InferState, InferWithState, InferenceResult};
 use hir::{BlockItem, Definition, ExprIdx, Expression, Ident, Item, Literal, TextRange};
@@ -17,6 +17,13 @@ fn to_span(range: TextRange) -> SourceSpan {
     let start: usize = range.start().into();
     let len: usize = range.len().into();
     (start, len).into()
+}
+
+/// Information about a struct definition
+#[derive(Debug, Clone)]
+pub(crate) struct StructInfo {
+    pub name: String,
+    pub fields: Vec<(String, Type)>, // (field_name, field_type)
 }
 
 pub(crate) struct InferCtx<'a> {
@@ -28,6 +35,10 @@ pub(crate) struct InferCtx<'a> {
     diagnostics: Vec<InferDiagnostic>,
     /// Expected return type for the current function (for return statement inference)
     expected_return: Option<Type>,
+    /// Struct registry: maps struct name to (StructId, StructInfo)
+    structs: HashMap<String, (StructId, StructInfo)>,
+    /// Counter for struct IDs
+    next_struct_id: u32,
 }
 
 impl<'a> InferCtx<'a> {
@@ -40,6 +51,8 @@ impl<'a> InferCtx<'a> {
             expr_types: ArenaMap::default(),
             diagnostics: Vec::new(),
             expected_return: None,
+            structs: HashMap::new(),
+            next_struct_id: 0,
         }
     }
 
@@ -52,7 +65,47 @@ impl<'a> InferCtx<'a> {
             expr_types: ArenaMap::default(),
             diagnostics: Vec::new(),
             expected_return: None,
+            structs: HashMap::new(),
+            next_struct_id: 0,
         }
+    }
+
+    /// Register a struct definition and return its StructId
+    fn register_struct(&mut self, name: &str) -> StructId {
+        if let Some((id, _)) = self.structs.get(name) {
+            return *id;
+        }
+        let id = StructId(self.next_struct_id);
+        self.next_struct_id += 1;
+        let info = StructInfo {
+            name: name.to_string(),
+            fields: Vec::new(), // Fields will be populated later if needed
+        };
+        self.structs.insert(name.to_string(), (id, info));
+        id
+    }
+
+    /// Look up a struct by name
+    fn lookup_struct(&self, name: &str) -> Option<(StructId, &StructInfo)> {
+        self.structs.get(name).map(|(id, info)| (*id, info))
+    }
+
+    /// Look up a struct by ID
+    fn lookup_struct_by_id(&self, id: StructId) -> Option<&StructInfo> {
+        self.structs
+            .values()
+            .find(|(sid, _)| *sid == id)
+            .map(|(_, info)| info)
+    }
+
+    /// Look up a field type in a struct
+    fn lookup_field_type(&self, struct_id: StructId, field_name: &str) -> Option<Type> {
+        self.lookup_struct_by_id(struct_id).and_then(|info| {
+            info.fields
+                .iter()
+                .find(|(name, _)| name == field_name)
+                .map(|(_, ty)| ty.clone())
+        })
     }
 
     /// Resolve an Ident to its string representation
@@ -68,10 +121,10 @@ impl<'a> InferCtx<'a> {
 
     /// Parse a type name string into a Type
     fn parse_type_name(&self, name: &str) -> Type {
-        match name {
-            "int" => Type::Integer,
+        match name.to_lowercase().as_str() {
+            "int" | "integer" => Type::Integer,
             "float" => Type::Float,
-            "bool" => Type::Boolean,
+            "bool" | "boolean" => Type::Boolean,
             "string" => Type::String,
             "unit" => Type::Unit,
             _ => Type::Error, // Unknown type name
@@ -278,6 +331,66 @@ impl<'a> InferCtx<'a> {
                 self.unify_or_error(&index_ty, &Type::Integer, idx_span);
                 self.unify_or_error(&value_ty, &elem_ty, span);
             }
+            Item::StructDefinition(struct_def) => {
+                // Register struct definition with field types
+                let name_str = self.resolve(struct_def.name).to_string();
+                let struct_id = self.register_struct(&name_str);
+
+                // Parse and store field types
+                let fields: Vec<(String, Type)> = struct_def
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        let field_name = self.resolve(f.name).to_string();
+                        let field_type = self.parse_type_name(self.resolve(f.ty));
+                        (field_name, field_type)
+                    })
+                    .collect();
+
+                // Update StructInfo with field information
+                if let Some((_, info)) = self.structs.get_mut(&name_str) {
+                    info.fields = fields;
+                }
+
+                let ty = Type::Struct(struct_id);
+                // Store a constructor-like scheme for the struct
+                let scheme = Scheme::mono(ty);
+                self.env.insert(name_str, scheme);
+            }
+            Item::FieldAssignment {
+                object,
+                field,
+                value,
+            } => {
+                let (obj_ty, obj_span) = self.infer_expr_idx(*object);
+                let value_ty = self.infer_expr(value, span);
+                let field_name = self.resolve(*field).to_string();
+
+                match self.subst.apply(&obj_ty) {
+                    Type::Struct(struct_id) => {
+                        // Look up the expected field type and unify
+                        if let Some(field_ty) = self.lookup_field_type(struct_id, &field_name) {
+                            self.unify_or_error(&field_ty, &value_ty, span);
+                        } else {
+                            self.diagnostics.push(InferDiagnostic::UndefinedField {
+                                struct_name: self
+                                    .lookup_struct_by_id(struct_id)
+                                    .map(|i| i.name.clone())
+                                    .unwrap_or_else(|| "unknown".to_string()),
+                                field_name,
+                                span: to_span(span),
+                            });
+                        }
+                    }
+                    other => {
+                        self.diagnostics.push(InferDiagnostic::TypeMismatch {
+                            expected: "struct".to_string(),
+                            found: format!("{}", other),
+                            span: to_span(obj_span),
+                        });
+                    }
+                }
+            }
             Item::Expression(expr) => {
                 self.infer_expr(expr, span);
             }
@@ -406,6 +519,105 @@ impl<'a> InferCtx<'a> {
             Expression::Tuple { elements } => self.infer_tuple(elements),
             Expression::TupleAccess { tuple, index } => {
                 self.infer_tuple_access(*tuple, *index, span)
+            }
+            Expression::Struct {
+                name,
+                fields,
+                spread,
+            } => {
+                let name_str = self.resolve(*name).to_string();
+                // Look up or register the struct type
+                let struct_id = if let Some((id, _)) = self.lookup_struct(&name_str) {
+                    id
+                } else {
+                    self.register_struct(&name_str)
+                };
+
+                // Collect provided field names
+                let mut provided_fields = std::collections::HashSet::new();
+
+                // Infer and check types for all field values
+                for (field_name_ident, field_expr) in fields {
+                    let field_name = self.resolve(*field_name_ident).to_string();
+                    let (field_value_ty, field_span) = self.infer_expr_idx(*field_expr);
+
+                    provided_fields.insert(field_name.clone());
+
+                    // Check that field value matches declared field type
+                    if let Some(expected_ty) = self.lookup_field_type(struct_id, &field_name) {
+                        self.unify_or_error(&expected_ty, &field_value_ty, field_span);
+                    } else {
+                        self.diagnostics.push(InferDiagnostic::UndefinedField {
+                            struct_name: name_str.clone(),
+                            field_name,
+                            span: to_span(field_span),
+                        });
+                    }
+                }
+
+                // If there's a spread, it should be the same struct type
+                if let Some(spread_expr) = spread {
+                    let (spread_ty, spread_span) = self.infer_expr_idx(*spread_expr);
+                    self.unify_or_error(&spread_ty, &Type::Struct(struct_id), spread_span);
+                } else {
+                    // No spread - check that all required fields are provided
+                    let missing: Vec<String> = self
+                        .lookup_struct_by_id(struct_id)
+                        .map(|info| {
+                            info.fields
+                                .iter()
+                                .filter(|(name, _)| !provided_fields.contains(name))
+                                .map(|(name, _)| name.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    for field_name in missing {
+                        self.diagnostics.push(InferDiagnostic::MissingField {
+                            struct_name: name_str.clone(),
+                            field_name,
+                            span: to_span(span),
+                        });
+                    }
+                }
+
+                Type::Struct(struct_id)
+            }
+            Expression::FieldAccess { object, field } => {
+                let (obj_ty, obj_span) = self.infer_expr_idx(*object);
+                let field_name = self.resolve(*field).to_string();
+                let resolved = self.subst.apply(&obj_ty);
+
+                match resolved {
+                    Type::Struct(struct_id) => {
+                        // Look up the field type
+                        if let Some(field_ty) = self.lookup_field_type(struct_id, &field_name) {
+                            field_ty
+                        } else {
+                            self.diagnostics.push(InferDiagnostic::UndefinedField {
+                                struct_name: self
+                                    .lookup_struct_by_id(struct_id)
+                                    .map(|i| i.name.clone())
+                                    .unwrap_or_else(|| "unknown".to_string()),
+                                field_name,
+                                span: to_span(span),
+                            });
+                            Type::Error
+                        }
+                    }
+                    Type::Var(_) => {
+                        // Can't statically determine struct type yet
+                        Type::Var(self.fresh_var())
+                    }
+                    _ => {
+                        self.diagnostics.push(InferDiagnostic::TypeMismatch {
+                            expected: "struct".to_string(),
+                            found: resolved.to_string(),
+                            span: to_span(obj_span),
+                        });
+                        Type::Error
+                    }
+                }
             }
         }
     }
@@ -560,6 +772,40 @@ impl<'a> InferCtx<'a> {
                     );
                     self.unify_or_error(&index_ty, &Type::Integer, idx_span);
                     self.unify_or_error(&value_ty, &elem_ty, val_span);
+                }
+                BlockItem::FieldAssignment {
+                    object,
+                    field,
+                    value,
+                } => {
+                    let (obj_ty, obj_span) = self.infer_expr_idx(*object);
+                    let (value_ty, val_span) = self.infer_expr_idx(*value);
+                    let field_name = self.resolve(*field).to_string();
+
+                    match self.subst.apply(&obj_ty) {
+                        Type::Struct(struct_id) => {
+                            // Look up the expected field type and unify
+                            if let Some(field_ty) = self.lookup_field_type(struct_id, &field_name) {
+                                self.unify_or_error(&field_ty, &value_ty, val_span);
+                            } else {
+                                self.diagnostics.push(InferDiagnostic::UndefinedField {
+                                    struct_name: self
+                                        .lookup_struct_by_id(struct_id)
+                                        .map(|i| i.name.clone())
+                                        .unwrap_or_else(|| "unknown".to_string()),
+                                    field_name,
+                                    span: to_span(val_span),
+                                });
+                            }
+                        }
+                        other => {
+                            self.diagnostics.push(InferDiagnostic::TypeMismatch {
+                                expected: "struct".to_string(),
+                                found: format!("{}", other),
+                                span: to_span(obj_span),
+                            });
+                        }
+                    }
                 }
             }
         }

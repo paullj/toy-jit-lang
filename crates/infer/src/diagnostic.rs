@@ -88,4 +88,22 @@ pub enum InferDiagnostic {
         #[label("expected `{expected}`, found `{found}`")]
         span: SourceSpan,
     },
+
+    #[error("struct `{struct_name}` has no field `{field_name}`")]
+    #[diagnostic(code(infer::undefined_field))]
+    UndefinedField {
+        struct_name: String,
+        field_name: String,
+        #[label("field not found")]
+        span: SourceSpan,
+    },
+
+    #[error("missing field `{field_name}` in struct `{struct_name}`")]
+    #[diagnostic(code(infer::missing_field))]
+    MissingField {
+        struct_name: String,
+        field_name: String,
+        #[label("missing field `{field_name}`")]
+        span: SourceSpan,
+    },
 }

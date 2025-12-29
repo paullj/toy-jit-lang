@@ -77,6 +77,39 @@ impl<'a> Source<'a> {
         self.internal_peek()
     }
 
+    /// Peeks at the Nth non-trivia token (0-indexed, so peek_nth(0) == peek())
+    /// Uses speculative lexing to look ahead without consuming tokens.
+    pub(crate) fn peek_nth(&mut self, n: usize) -> Option<lex::TokenKind> {
+        self.consume_trivia();
+
+        // Get current position
+        let start_offset = match self.internal_peek() {
+            Some(t) => t.span.start,
+            None => return None,
+        };
+
+        // Create a new lexer from current position for speculative scanning
+        let remaining = &self.source_text[start_offset..];
+        let mut scan_lexer = Lexer::new(remaining);
+
+        let mut count = 0;
+        for result in scan_lexer.by_ref() {
+            let Ok(token) = result else { continue };
+
+            // Skip trivia
+            if token.kind.is_trivia() {
+                continue;
+            }
+
+            if count == n {
+                return Some(token.kind);
+            }
+            count += 1;
+        }
+
+        None
+    }
+
     /// Checks if current token is trivia without consuming it
     pub(crate) fn at_trivia(&mut self) -> bool {
         if let Some(token) = self.internal_peek() {

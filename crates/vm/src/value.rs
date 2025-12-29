@@ -5,6 +5,7 @@
 //! - Other types: quiet NaN + 3-bit tag + 48-bit payload
 
 use std::cell::Cell;
+use std::collections::HashMap;
 
 use compile::Spur;
 use lasso::{Key, Rodeo};
@@ -46,6 +47,11 @@ const AGG_TUPLE: u64 = 0x0000_4000_0000_0000; // bits 46-47 = 01
 const AGG_SUBTYPE_MASK: u64 = 0x0000_C000_0000_0000;
 const AGG_PAYLOAD_MASK: u64 = 0x0000_3FFF_FFFF_FFFF; // 46 bits
 
+// Object subtypes (bits 46-47 of payload)
+const OBJ_STRUCT: u64 = 0x0000_0000_0000_0000; // bits 46-47 = 00
+const OBJ_SUBTYPE_MASK: u64 = 0x0000_C000_0000_0000;
+const OBJ_PAYLOAD_MASK: u64 = 0x0000_3FFF_FFFF_FFFF; // 46 bits
+
 // Combined patterns for fast checking
 const QNAN_INT: u64 = QNAN | TAG_INT;
 const QNAN_BOOL: u64 = QNAN | TAG_BOOL;
@@ -57,6 +63,8 @@ const QNAN_CLOSURE: u64 = QNAN | TAG_CLOSURE;
 const QNAN_AGGREGATE: u64 = QNAN | TAG_AGGREGATE;
 const QNAN_LIST: u64 = QNAN | TAG_AGGREGATE | AGG_LIST;
 const QNAN_TUPLE: u64 = QNAN | TAG_AGGREGATE | AGG_TUPLE;
+const QNAN_OBJECT: u64 = QNAN | TAG_OBJECT;
+const QNAN_STRUCT: u64 = QNAN | TAG_OBJECT | OBJ_STRUCT;
 
 // Mask for type checking: QNAN + TAG
 const TYPE_MASK: u64 = QNAN | TAG_MASK;
@@ -73,6 +81,7 @@ const TYPE_MASK: u64 = QNAN | TAG_MASK;
 /// - Closure: QNAN | TAG_CLOSURE | 48-bit heap index
 /// - List: QNAN | TAG_AGGREGATE | AGG_LIST | 46-bit heap index
 /// - Tuple: QNAN | TAG_AGGREGATE | AGG_TUPLE | 46-bit heap index
+/// - Struct: QNAN | TAG_OBJECT | OBJ_STRUCT | 46-bit heap index
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Value(u64);
@@ -124,6 +133,11 @@ impl Value {
     #[inline(always)]
     pub const fn tuple(idx: u32) -> Self {
         Self(QNAN_TUPLE | (idx as u64))
+    }
+
+    #[inline(always)]
+    pub const fn struct_obj(idx: u32) -> Self {
+        Self(QNAN_STRUCT | (idx as u64))
     }
 
     /// Get raw bits for passing to/from JIT (NaN-boxed representation).
@@ -202,6 +216,18 @@ impl Value {
     #[inline(always)]
     pub fn is_tuple(&self) -> bool {
         self.is_aggregate() && (self.0 & AGG_SUBTYPE_MASK) == AGG_TUPLE
+    }
+
+    /// Check if this is any object type (struct, enum)
+    #[inline(always)]
+    pub fn is_object(&self) -> bool {
+        (self.0 & TYPE_MASK) == QNAN_OBJECT
+    }
+
+    /// Check if this is a struct
+    #[inline(always)]
+    pub fn is_struct(&self) -> bool {
+        self.is_object() && (self.0 & OBJ_SUBTYPE_MASK) == OBJ_STRUCT
     }
 
     #[inline(always)]
@@ -327,6 +353,22 @@ impl Value {
         (self.0 & AGG_PAYLOAD_MASK) as u32
     }
 
+    #[inline(always)]
+    pub fn as_struct_idx(&self) -> Option<u32> {
+        if self.is_struct() {
+            Some((self.0 & OBJ_PAYLOAD_MASK) as u32)
+        } else {
+            None
+        }
+    }
+
+    /// Get struct index. Panics in debug if wrong type.
+    #[inline(always)]
+    pub fn as_struct_idx_unchecked(&self) -> u32 {
+        debug_assert!(self.is_struct(), "expected Struct");
+        (self.0 & OBJ_PAYLOAD_MASK) as u32
+    }
+
     pub fn type_name(&self) -> &'static str {
         if self.is_float() {
             "Float"
@@ -340,6 +382,10 @@ impl Value {
                 QNAN_AGGREGATE => match self.0 & AGG_SUBTYPE_MASK {
                     AGG_LIST => "List",
                     AGG_TUPLE => "Tuple",
+                    _ => "Unknown",
+                },
+                QNAN_OBJECT => match self.0 & OBJ_SUBTYPE_MASK {
+                    OBJ_STRUCT => "Struct",
                     _ => "Unknown",
                 },
                 _ => "Unknown",
@@ -387,6 +433,26 @@ impl Value {
                     let elements: Vec<String> =
                         tuple.elements.iter().map(|v| v.display(heap)).collect();
                     format!("({})", elements.join(", "))
+                }
+                _ => "<unknown>".to_string(),
+            },
+            QNAN_OBJECT => match self.0 & OBJ_SUBTYPE_MASK {
+                OBJ_STRUCT => {
+                    let idx = (self.0 & OBJ_PAYLOAD_MASK) as u32;
+                    let s = heap.get_struct(idx);
+                    if let Some(meta) = heap.get_struct_meta(s.struct_id) {
+                        let fields: Vec<String> = s
+                            .fields
+                            .iter()
+                            .zip(&meta.field_names)
+                            .map(|(v, name)| format!("{}: {}", name, v.display(heap)))
+                            .collect();
+                        format!("{} {{ {} }}", meta.name, fields.join(", "))
+                    } else {
+                        let fields: Vec<String> =
+                            s.fields.iter().map(|v| v.display(heap)).collect();
+                        format!("#{} {{ {} }}", s.struct_id, fields.join(", "))
+                    }
                 }
                 _ => "<unknown>".to_string(),
             },
@@ -439,6 +505,31 @@ impl Value {
                         .map(|v| v.display_with_interner(heap, interner))
                         .collect();
                     format!("({})", elements.join(", "))
+                }
+                _ => "<unknown>".to_string(),
+            },
+            QNAN_OBJECT => match self.0 & OBJ_SUBTYPE_MASK {
+                OBJ_STRUCT => {
+                    let idx = (self.0 & OBJ_PAYLOAD_MASK) as u32;
+                    let s = heap.get_struct(idx);
+                    if let Some(meta) = heap.get_struct_meta(s.struct_id) {
+                        let fields: Vec<String> = s
+                            .fields
+                            .iter()
+                            .zip(&meta.field_names)
+                            .map(|(v, name)| {
+                                format!("{}: {}", name, v.display_with_interner(heap, interner))
+                            })
+                            .collect();
+                        format!("{} {{ {} }}", meta.name, fields.join(", "))
+                    } else {
+                        let fields: Vec<String> = s
+                            .fields
+                            .iter()
+                            .map(|v| v.display_with_interner(heap, interner))
+                            .collect();
+                        format!("#{} {{ {} }}", s.struct_id, fields.join(", "))
+                    }
                 }
                 _ => "<unknown>".to_string(),
             },
@@ -578,6 +669,10 @@ impl std::fmt::Debug for Value {
                 AGG_TUPLE => write!(f, "Tuple(idx={})", self.0 & AGG_PAYLOAD_MASK),
                 _ => write!(f, "Aggregate(unknown=0x{:016x})", self.0),
             },
+            QNAN_OBJECT => match self.0 & OBJ_SUBTYPE_MASK {
+                OBJ_STRUCT => write!(f, "Struct(idx={})", self.0 & OBJ_PAYLOAD_MASK),
+                _ => write!(f, "Object(unknown=0x{:016x})", self.0),
+            },
             _ => write!(f, "Unknown(0x{:016x})", self.0),
         }
     }
@@ -599,6 +694,19 @@ pub struct TupleData {
     pub elements: Box<[Value]>, // fixed after creation
 }
 
+/// Struct data stored in heap pool.
+pub struct StructData {
+    pub struct_id: u32,       // identifies the struct type
+    pub fields: Box<[Value]>, // fixed-size fields
+}
+
+/// Struct type metadata for display purposes.
+#[derive(Clone)]
+pub struct StructMeta {
+    pub name: String,
+    pub field_names: Vec<String>,
+}
+
 /// GC statistics for debugging/profiling.
 #[derive(Debug, Clone, Default)]
 pub struct GcStats {
@@ -608,27 +716,34 @@ pub struct GcStats {
     pub closures_freed: u64,
     pub lists_freed: u64,
     pub tuples_freed: u64,
+    pub structs_freed: u64,
 }
 
-/// Heap for dynamic strings, closures, lists, and tuples with mark-and-sweep GC.
+/// Heap for dynamic strings, closures, lists, tuples, and structs with mark-and-sweep GC.
 pub struct Heap {
     // Object storage (None = freed slot)
     strings: Vec<Option<String>>,
     closures: Vec<Option<ClosureData>>,
     lists: Vec<Option<ListData>>,
     tuples: Vec<Option<TupleData>>,
+    structs: Vec<Option<StructData>>,
+
+    // Struct type metadata (struct_id -> metadata)
+    struct_meta: HashMap<u32, StructMeta>,
 
     // Free lists for slot reuse
     free_strings: Vec<u32>,
     free_closures: Vec<u32>,
     free_lists: Vec<u32>,
     free_tuples: Vec<u32>,
+    free_structs: Vec<u32>,
 
     // Mark bits (separate for cache efficiency)
     string_marks: Vec<bool>,
     closure_marks: Vec<bool>,
     list_marks: Vec<bool>,
     tuple_marks: Vec<bool>,
+    struct_marks: Vec<bool>,
 
     // GC state
     bytes_allocated: usize,
@@ -648,18 +763,33 @@ impl Heap {
             closures: Vec::new(),
             lists: Vec::new(),
             tuples: Vec::new(),
+            structs: Vec::new(),
+            struct_meta: HashMap::new(),
             free_strings: Vec::new(),
             free_closures: Vec::new(),
             free_lists: Vec::new(),
             free_tuples: Vec::new(),
+            free_structs: Vec::new(),
             string_marks: Vec::new(),
             closure_marks: Vec::new(),
             list_marks: Vec::new(),
             tuple_marks: Vec::new(),
+            struct_marks: Vec::new(),
             bytes_allocated: 0,
             gc_threshold: INITIAL_GC_THRESHOLD,
             stats: GcStats::default(),
         }
+    }
+
+    /// Register struct type metadata for display purposes.
+    pub fn register_struct_meta(&mut self, struct_id: u32, name: String, field_names: Vec<String>) {
+        self.struct_meta
+            .insert(struct_id, StructMeta { name, field_names });
+    }
+
+    /// Get struct metadata by struct_id.
+    pub fn get_struct_meta(&self, struct_id: u32) -> Option<&StructMeta> {
+        self.struct_meta.get(&struct_id)
     }
 
     /// Allocate a string on the heap, returns index.
@@ -782,6 +912,43 @@ impl Heap {
             .expect("accessing freed tuple")
     }
 
+    /// Allocate a struct on the heap, returns index.
+    pub fn alloc_struct(&mut self, struct_id: u32, fields: Vec<Value>) -> u32 {
+        // Estimate struct size: struct_id (4) + Box overhead (16) + fields (8 * len)
+        let size = 4 + 16 + 8 * fields.len();
+        let data = StructData {
+            struct_id,
+            fields: fields.into_boxed_slice(),
+        };
+
+        let idx = if let Some(free_idx) = self.free_structs.pop() {
+            self.structs[free_idx as usize] = Some(data);
+            self.struct_marks[free_idx as usize] = false;
+            free_idx
+        } else {
+            let idx = self.structs.len() as u32;
+            self.structs.push(Some(data));
+            self.struct_marks.push(false);
+            idx
+        };
+        self.bytes_allocated += size;
+        idx
+    }
+
+    /// Get struct by index. Panics if freed.
+    pub fn get_struct(&self, idx: u32) -> &StructData {
+        self.structs[idx as usize]
+            .as_ref()
+            .expect("accessing freed struct")
+    }
+
+    /// Get mutable struct by index. Panics if freed.
+    pub fn get_struct_mut(&mut self, idx: u32) -> &mut StructData {
+        self.structs[idx as usize]
+            .as_mut()
+            .expect("accessing freed struct")
+    }
+
     /// Check if GC should run based on allocation threshold.
     pub fn should_gc(&self) -> bool {
         self.bytes_allocated > self.gc_threshold
@@ -835,6 +1002,16 @@ impl Heap {
                 }
             }
             None
+        } else if value.is_struct() {
+            let idx = value.as_struct_idx().unwrap() as usize;
+            if idx < self.struct_marks.len() && !self.struct_marks[idx] {
+                self.struct_marks[idx] = true;
+                // Return fields to trace
+                if let Some(s) = &self.structs[idx] {
+                    return Some(s.fields.to_vec());
+                }
+            }
+            None
         } else {
             None // Non-heap types
         }
@@ -858,6 +1035,7 @@ impl Heap {
         let mut closures_freed = 0u64;
         let mut lists_freed = 0u64;
         let mut tuples_freed = 0u64;
+        let mut structs_freed = 0u64;
 
         // Sweep strings
         for (i, marked) in self.string_marks.iter_mut().enumerate() {
@@ -902,12 +1080,24 @@ impl Heap {
             *marked = false;
         }
 
+        // Sweep structs
+        for (i, marked) in self.struct_marks.iter_mut().enumerate() {
+            if !*marked && let Some(s) = self.structs[i].take() {
+                let size = 4 + 16 + 8 * s.fields.len();
+                bytes_freed += size as u64;
+                structs_freed += 1;
+                self.free_structs.push(i as u32);
+            }
+            *marked = false;
+        }
+
         self.bytes_allocated = self.bytes_allocated.saturating_sub(bytes_freed as usize);
         self.stats.bytes_freed += bytes_freed;
         self.stats.strings_freed += strings_freed;
         self.stats.closures_freed += closures_freed;
         self.stats.lists_freed += lists_freed;
         self.stats.tuples_freed += tuples_freed;
+        self.stats.structs_freed += structs_freed;
     }
 
     /// Run a full GC cycle with the given roots.

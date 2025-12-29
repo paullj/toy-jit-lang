@@ -168,7 +168,9 @@ impl<'a> FunctionTranslator<'a> {
             | Inst::ListSlice { dst, .. }
             | Inst::ListLen { dst, .. }
             | Inst::TupleNew { dst, .. }
-            | Inst::TupleGet { dst, .. } => Some(*dst),
+            | Inst::TupleGet { dst, .. }
+            | Inst::StructNew { dst, .. }
+            | Inst::StructGet { dst, .. } => Some(*dst),
             Inst::Call { dst, .. } | Inst::CallIndirect { dst, .. } => *dst,
             _ => None,
         }
@@ -668,6 +670,99 @@ impl<'a> FunctionTranslator<'a> {
                 self.builder.def_var(vreg_vars[dst], result);
                 self.last_value = Some(result);
             }
+            // Struct operations
+            Inst::StructNew {
+                dst,
+                struct_id,
+                fields,
+            } => {
+                let ctx = self
+                    .context_ptr
+                    .expect("struct ops need context (main only)");
+                let count = fields.len();
+
+                if count == 0 {
+                    // Empty struct - pass null pointer
+                    let null_ptr = self.builder.ins().iconst(self.int_type, 0);
+                    let struct_id_val = self.builder.ins().iconst(types::I64, *struct_id as i64);
+                    let count_val = self.builder.ins().iconst(types::I64, 0);
+                    let func_ref = self.get_runtime_fn("rt_struct_new");
+                    let call = self
+                        .builder
+                        .ins()
+                        .call(func_ref, &[ctx, struct_id_val, null_ptr, count_val]);
+                    let result = self.builder.inst_results(call)[0];
+                    self.builder.def_var(vreg_vars[dst], result);
+                    self.last_value = Some(result);
+                } else {
+                    // Allocate stack slot for fields
+                    let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        (count * 8) as u32,
+                        8, // alignment
+                    ));
+
+                    // Store each field (NaN-boxed) into the stack slot
+                    for (i, field) in fields.iter().enumerate() {
+                        let field_val = self.operand_to_nan_boxed_with_vars(field, vreg_vars);
+                        let offset = (i * 8) as i32;
+                        self.builder.ins().stack_store(field_val, slot, offset);
+                    }
+
+                    // Get pointer to stack slot
+                    let field_ptr = self.builder.ins().stack_addr(self.int_type, slot, 0);
+                    let struct_id_val = self.builder.ins().iconst(types::I64, *struct_id as i64);
+                    let count_val = self.builder.ins().iconst(types::I64, count as i64);
+
+                    let func_ref = self.get_runtime_fn("rt_struct_new");
+                    let call = self
+                        .builder
+                        .ins()
+                        .call(func_ref, &[ctx, struct_id_val, field_ptr, count_val]);
+                    let result = self.builder.inst_results(call)[0];
+
+                    self.builder.def_var(vreg_vars[dst], result);
+                    self.last_value = Some(result);
+                }
+            }
+            Inst::StructGet {
+                dst,
+                struct_ref,
+                field_index,
+            } => {
+                let ctx = self
+                    .context_ptr
+                    .expect("struct ops need context (main only)");
+                let struct_val = self.operand_to_value_with_vars(struct_ref, vreg_vars);
+                let idx_val = self.builder.ins().iconst(types::I64, *field_index as i64);
+
+                let func_ref = self.get_runtime_fn("rt_struct_get");
+                let call = self
+                    .builder
+                    .ins()
+                    .call(func_ref, &[ctx, struct_val, idx_val]);
+                let result = self.builder.inst_results(call)[0];
+
+                self.builder.def_var(vreg_vars[dst], result);
+                self.last_value = Some(result);
+            }
+            Inst::StructSet {
+                struct_ref,
+                field_index,
+                value,
+            } => {
+                let ctx = self
+                    .context_ptr
+                    .expect("struct ops need context (main only)");
+                let struct_val = self.operand_to_value_with_vars(struct_ref, vreg_vars);
+                let idx_val = self.builder.ins().iconst(types::I64, *field_index as i64);
+                let val = self.operand_to_nan_boxed_with_vars(value, vreg_vars);
+
+                let func_ref = self.get_runtime_fn("rt_struct_set");
+                self.builder
+                    .ins()
+                    .call(func_ref, &[ctx, struct_val, idx_val, val]);
+            }
         }
     }
 
@@ -730,6 +825,28 @@ impl<'a> FunctionTranslator<'a> {
                 sig.params.push(AbiParam::new(types::I64)); // tuple
                 sig.params.push(AbiParam::new(types::I64)); // index
                 sig.returns.push(AbiParam::new(types::I64)); // element value
+            }
+            "rt_struct_new" => {
+                // fn(ctx: *mut, struct_id: i64, fields_ptr: *const i64, count: i64) -> i64
+                sig.params.push(AbiParam::new(ptr_type)); // ctx
+                sig.params.push(AbiParam::new(types::I64)); // struct_id
+                sig.params.push(AbiParam::new(ptr_type)); // fields_ptr
+                sig.params.push(AbiParam::new(types::I64)); // count
+                sig.returns.push(AbiParam::new(types::I64)); // struct value
+            }
+            "rt_struct_get" => {
+                // fn(ctx: *mut, struct_val: i64, field_index: i64) -> i64
+                sig.params.push(AbiParam::new(ptr_type)); // ctx
+                sig.params.push(AbiParam::new(types::I64)); // struct
+                sig.params.push(AbiParam::new(types::I64)); // field_index
+                sig.returns.push(AbiParam::new(types::I64)); // field value
+            }
+            "rt_struct_set" => {
+                // fn(ctx: *mut, struct_val: i64, field_index: i64, value: i64)
+                sig.params.push(AbiParam::new(ptr_type)); // ctx
+                sig.params.push(AbiParam::new(types::I64)); // struct
+                sig.params.push(AbiParam::new(types::I64)); // field_index
+                sig.params.push(AbiParam::new(types::I64)); // value
             }
             _ => panic!("unknown runtime function: {}", name),
         }

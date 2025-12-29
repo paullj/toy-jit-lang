@@ -9,6 +9,7 @@ const ITEM_RECOVERY: TokenSet = EXPR_FIRST
     .union(TokenSet::single(TokenKind::NewLine))
     .union(TokenSet::single(TokenKind::Identifier))
     .union(TokenSet::single(TokenKind::Fn))
+    .union(TokenSet::single(TokenKind::Struct))
     .union(TokenSet::single(TokenKind::Return))
     .union(TokenSet::single(TokenKind::Echo))
     .union(TokenSet::single(TokenKind::Break))
@@ -17,6 +18,7 @@ const ITEM_RECOVERY: TokenSet = EXPR_FIRST
 pub(crate) fn item(p: &mut Parser) -> Option<CompletedMarker> {
     match p.current() {
         Some(TokenKind::Fn) => Some(function_definition_or_expression(p)),
+        Some(TokenKind::Struct) => Some(crate::grammar::struct_definition(p)),
         Some(TokenKind::Return) => Some(return_statement(p)),
         Some(TokenKind::Echo) => Some(echo_statement(p)),
         Some(TokenKind::Break) => Some(break_statement(p)),
@@ -116,10 +118,10 @@ pub(crate) fn item(p: &mut Parser) -> Option<CompletedMarker> {
                     }
                 }
                 _ => {
-                    // Identifier possibly followed by call/index or operators -> treat as expression
+                    // Identifier possibly followed by call/index/field access or operators -> treat as expression
                     let mut lhs = m.complete(p, SyntaxKind::VariableReference);
 
-                    // Handle postfix operations (call expressions, indexes)
+                    // Handle postfix operations (call expressions, indexes, field access)
                     loop {
                         // Check for newline terminator, but allow `[` to continue if index
                         if p.at_newline_terminator() {
@@ -134,13 +136,34 @@ pub(crate) fn item(p: &mut Parser) -> Option<CompletedMarker> {
                             lhs = call_expression(p, lhs);
                         } else if p.at(TokenKind::LeftBracket) {
                             lhs = index_or_slice_expression(p, lhs);
+                        } else if p.at(TokenKind::Dot) {
+                            // Field or tuple access
+                            let dot_m = lhs.precede(p);
+                            p.consume(); // eat '.'
+                            if p.at(TokenKind::Integer) {
+                                p.consume();
+                                lhs = dot_m.complete(p, SyntaxKind::TupleAccessExpression);
+                            } else if p.at(TokenKind::Identifier) {
+                                p.consume();
+                                lhs = dot_m.complete(p, SyntaxKind::FieldAccessExpression);
+                            } else {
+                                lhs = dot_m.complete(p, SyntaxKind::FieldAccessExpression);
+                            }
                         } else {
                             break;
                         }
                     }
 
-                    // Then handle infix operators
-                    inner_expression_with_binding_power(p, lhs, 0)
+                    // Check for field assignment: x.field = value
+                    if p.at(TokenKind::Equals) && lhs.kind() == SyntaxKind::FieldAccessExpression {
+                        let assign_m = lhs.precede(p);
+                        p.consume(); // eat '='
+                        expression(p);
+                        Some(assign_m.complete(p, SyntaxKind::FieldAssignment))
+                    } else {
+                        // Then handle infix operators
+                        inner_expression_with_binding_power(p, lhs, 0)
+                    }
                 }
             }
         }
