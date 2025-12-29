@@ -34,8 +34,13 @@ toy is a simple programming language that is made for fun.
   * hover for variables doesn't show type in blocks
   * infer has some stuff in there which is not related to type inference
   * string consts not working properly in jit
+  * returning from blocks. not sure this works
 
 * improvements
+  * make lists
+  * around ast (/hir/mir) nodes so that item has:
+    * statements / expressions?
+    * definitions / assignments / expressions?
   * rename int to Int, float to Float, bool to Bool, string to String
   * handle postfix operators in parser better
     * should be the same as prefix operators
@@ -67,27 +72,11 @@ toy is a simple programming language that is made for fun.
     * add more examples
     * unsure if i should make the docs have useful examples or just focus on language features
 
-* tiered execution
-  * interpret code first
-  * profile hot paths
-  * jit compile hot paths
-
-* garbage collection improvements
-  * but what?
-
-* structs
-* tuples
 * enums
 * traits / interfaces
-
-* exceptions / error handling
-  * try/catch
-  * result type
-  * option type
+* generics
 
 * pattern matching
-
-* generics
 
 * modules
   * import / export system
@@ -101,9 +90,22 @@ toy is a simple programming language that is made for fun.
       * can be built into a library file to be used by other programs
       * can be published to git repo
 
-  * build system
-    * portable build with embedded interpreter/jit
-    * cross-compilation support
+* tiered execution
+  * interpret code first
+  * profile hot paths
+  * jit compile hot paths
+
+* garbage collection improvements
+  * but what?
+
+* exceptions / error handling
+  * try/catch
+  * result type
+  * option type
+
+* build system
+  * portable build with embedded interpreter/jit
+  * cross-compilation support
 
 * extern functions / ffi
   * ability to call functions from other languages (e.g. c, rust)

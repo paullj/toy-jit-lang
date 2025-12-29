@@ -198,6 +198,10 @@
       "name": "keyword.control.loop.toy"
     },
     {
+      "match": "struct",
+      "name": "keyword.declaration.struct.toy"
+    },
+    {
       "match": "[a-zA-Z][a-zA-Z0-9_]*",
       "name": "variable.other.toy"
     },
