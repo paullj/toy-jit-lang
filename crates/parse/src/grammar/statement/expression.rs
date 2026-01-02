@@ -362,8 +362,9 @@ fn if_expression(p: &mut Parser) -> CompletedMarker {
             expected: "'{'".to_string(),
             found,
         });
+    } else {
+        block_expression(p);
     }
-    block_expression(p);
 
     // Check for else (allows newline before else)
     if p.eat(TokenKind::Else) {
@@ -380,8 +381,9 @@ fn if_expression(p: &mut Parser) -> CompletedMarker {
                     expected: "'{'".to_string(),
                     found,
                 });
+            } else {
+                block_expression(p);
             }
-            block_expression(p);
         }
     }
 
