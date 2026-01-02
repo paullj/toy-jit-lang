@@ -1,6 +1,6 @@
 use crate::{
     BlockItem, Definition, ExprIdx, Expression, FunctionParam, HirDiagnostic, Ident, InfixOp, Item,
-    Literal, PrefixOp, SymbolKind, SymbolTable,
+    Literal, PrefixOp, StructDef, StructField, SymbolKind, SymbolTable,
 };
 use ast::AstNode;
 use la_arena::{Arena, ArenaMap};
@@ -202,6 +202,29 @@ pub fn lower(root: ast::Root) -> LowerResult {
 
 fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
     match ast {
+        ast::Item::StructDefinition(struct_def) => {
+            let name_token = struct_def.name()?;
+            let name_str = name_token.text();
+            let def_span = struct_def.syntax().text_range();
+            let name_span = name_token.text_range();
+            let doc_comment = extract_doc_comment(struct_def.syntax());
+            ctx.define_symbol(name_str, def_span, name_span, doc_comment);
+            let name = ctx.intern(name_str);
+
+            let fields: Vec<StructField> = struct_def
+                .fields()
+                .filter_map(|f| {
+                    let field_name = ctx.intern(f.name()?.text());
+                    let type_name = ctx.intern(f.type_name()?.text());
+                    Some(StructField {
+                        name: field_name,
+                        ty: type_name,
+                    })
+                })
+                .collect();
+
+            Some(Item::StructDefinition(StructDef { name, fields }))
+        }
         ast::Item::FunctionDefinition(fn_def) => {
             let name_token = fn_def.name()?;
             let name_str = name_token.text();
@@ -281,6 +304,26 @@ fn lower_item(ctx: &mut Ctx, ast: ast::Item) -> Option<Item> {
                     // Slice assignment not yet supported
                     Some(Item::Expression(Expression::Missing))
                 }
+            }
+        }
+        ast::Item::FieldAssignment(field_asgn) => {
+            let target = field_asgn.target()?;
+            let value_expr = lower_expression(ctx, field_asgn.value());
+
+            if let ast::Expression::FieldAccess(field_access) = target {
+                let object = field_access.object().map(|e| {
+                    let span = e.syntax().text_range();
+                    let expr = lower_expression(ctx, Some(e));
+                    ctx.alloc(expr, span)
+                })?;
+                let field = ctx.intern(field_access.field()?.text());
+                Some(Item::FieldAssignment {
+                    object,
+                    field,
+                    value: value_expr,
+                })
+            } else {
+                Some(Item::Expression(Expression::Missing))
             }
         }
         ast::Item::ReturnStatement(ret) => {
@@ -405,6 +448,8 @@ fn lower_expression(ctx: &mut Ctx, ast: Option<ast::Expression>) -> Expression {
         ast::Expression::Slice(slice) => lower_slice(ctx, slice),
         ast::Expression::Tuple(tuple) => lower_tuple(ctx, tuple),
         ast::Expression::TupleAccess(access) => lower_tuple_access(ctx, access),
+        ast::Expression::Struct(s) => lower_struct(ctx, s),
+        ast::Expression::FieldAccess(access) => lower_field_access(ctx, access),
     }
 }
 
@@ -543,6 +588,60 @@ fn lower_tuple_access(ctx: &mut Ctx, access: ast::TupleAccessExpression) -> Expr
     let index = access.index().unwrap_or(0);
 
     Expression::TupleAccess { tuple, index }
+}
+
+fn lower_struct(ctx: &mut Ctx, s: ast::StructExpression) -> Expression {
+    let name = s
+        .name()
+        .map(|t| ctx.intern(t.text()))
+        .unwrap_or_else(|| ctx.intern("_"));
+
+    let fields: Vec<(Ident, ExprIdx)> = s
+        .fields()
+        .filter_map(|f| {
+            let field_name = ctx.intern(f.name()?.text());
+            let value = if let Some(v) = f.value() {
+                let span = v.syntax().text_range();
+                let expr = lower_expression(ctx, Some(v));
+                ctx.alloc(expr, span)
+            } else {
+                // Shorthand: `{ x }` is `{ x: x }`
+                let span = f.syntax().text_range();
+                let expr = Expression::VariableRef { name: field_name };
+                ctx.alloc(expr, span)
+            };
+            Some((field_name, value))
+        })
+        .collect();
+
+    let spread = s.spread().map(|e| {
+        let span = e.syntax().text_range();
+        let expr = lower_expression(ctx, Some(e));
+        ctx.alloc(expr, span)
+    });
+
+    Expression::Struct {
+        name,
+        fields,
+        spread,
+    }
+}
+
+fn lower_field_access(ctx: &mut Ctx, access: ast::FieldAccessExpression) -> Expression {
+    let object_ast = access.object();
+    let object_span = object_ast
+        .as_ref()
+        .map(|e| e.syntax().text_range())
+        .unwrap_or_default();
+    let object_expr = lower_expression(ctx, object_ast);
+    let object = ctx.alloc(object_expr, object_span);
+
+    let field = access
+        .field()
+        .map(|t| ctx.intern(t.text()))
+        .unwrap_or_else(|| ctx.intern("_"));
+
+    Expression::FieldAccess { object, field }
 }
 
 fn lower_infix(ctx: &mut Ctx, ast: ast::InfixExpression) -> Expression {
@@ -836,6 +935,11 @@ fn lower_range(ctx: &mut Ctx, ast: ast::RangeExpression) -> Expression {
 
 fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
     match ast {
+        ast::Item::StructDefinition(_) => {
+            // Struct definitions are not allowed inside blocks
+            // They should be at the top level only
+            None
+        }
         ast::Item::FunctionDefinition(fn_def) => {
             // Functions inside blocks are treated as local definitions
             let name_token = fn_def.name()?;
@@ -939,6 +1043,31 @@ fn lower_block_item(ctx: &mut Ctx, ast: ast::Item) -> Option<BlockItem> {
                     })
                 }
                 _ => None,
+            }
+        }
+        ast::Item::FieldAssignment(field_asgn) => {
+            let target = field_asgn.target()?;
+            let value = lower_expression(ctx, field_asgn.value());
+            let value_span = field_asgn
+                .value()
+                .map(|e| e.syntax().text_range())
+                .unwrap_or_default();
+            let value_idx = ctx.alloc(value, value_span);
+
+            if let ast::Expression::FieldAccess(field_access) = target {
+                let object = field_access.object().map(|e| {
+                    let span = e.syntax().text_range();
+                    let expr = lower_expression(ctx, Some(e));
+                    ctx.alloc(expr, span)
+                })?;
+                let field = ctx.intern(field_access.field()?.text());
+                Some(BlockItem::FieldAssignment {
+                    object,
+                    field,
+                    value: value_idx,
+                })
+            } else {
+                None
             }
         }
         ast::Item::ReturnStatement(ret) => {

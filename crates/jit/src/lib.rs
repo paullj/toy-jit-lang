@@ -62,6 +62,10 @@ impl Jit {
         builder.symbol("rt_tuple_new", runtime::rt_tuple_new as *const u8);
         builder.symbol("rt_tuple_get", runtime::rt_tuple_get as *const u8);
 
+        builder.symbol("rt_struct_new", runtime::rt_struct_new as *const u8);
+        builder.symbol("rt_struct_get", runtime::rt_struct_get as *const u8);
+        builder.symbol("rt_struct_set", runtime::rt_struct_set as *const u8);
+
         let module = JITModule::new(builder);
 
         Self {

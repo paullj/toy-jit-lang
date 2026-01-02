@@ -46,6 +46,8 @@ pub struct CompiledModule {
     pub main_idx: usize,
     /// Interned string table for all string constants
     pub strings: Rodeo,
+    /// Struct type metadata for display
+    pub struct_metadata: Vec<mir::StructMeta>,
 }
 
 impl CompiledModule {

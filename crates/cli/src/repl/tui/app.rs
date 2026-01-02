@@ -185,6 +185,10 @@ impl ReplApp {
                     Some(format!("{} = {}", lower.resolve(*name), result))
                 }
                 hir::Item::IndexAssignment { .. } => None,
+                hir::Item::StructDefinition(def) => {
+                    Some(format!("{} = <struct>", lower.resolve(def.name)))
+                }
+                hir::Item::FieldAssignment { .. } => None,
             }
         } else {
             None
@@ -267,6 +271,8 @@ fn get_item_type(
             .cloned()
             .unwrap_or(infer::Type::Integer),
         hir::Item::IndexAssignment { .. } => infer::Type::Unit,
+        hir::Item::StructDefinition(_) => infer::Type::Unit,
+        hir::Item::FieldAssignment { .. } => infer::Type::Unit,
         hir::Item::Expression(expr) => get_expr_type(expr, hir, infer),
     }
 }
@@ -341,6 +347,8 @@ fn get_expr_type(
         | hir::Expression::Slice { .. } => infer::Type::Unit,
         // Tuple expressions - type comes from inference
         hir::Expression::Tuple { .. } | hir::Expression::TupleAccess { .. } => infer::Type::Unit,
+        // Struct expressions - type comes from inference
+        hir::Expression::Struct { .. } | hir::Expression::FieldAccess { .. } => infer::Type::Unit,
     }
 }
 

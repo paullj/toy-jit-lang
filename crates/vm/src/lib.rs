@@ -39,6 +39,7 @@ mod tests {
         Module {
             functions: vec![func],
             main_id: FuncId(0),
+            struct_metadata: vec![],
         }
     }
 
@@ -140,6 +141,7 @@ mod tests {
         let module = Module {
             functions: vec![add_func, main_func],
             main_id: FuncId(1),
+            struct_metadata: vec![],
         };
 
         let compiled = compile(&module);
@@ -222,6 +224,7 @@ mod tests {
         let module = Module {
             functions: vec![inner_func, make_adder, main_func],
             main_id: FuncId(2),
+            struct_metadata: vec![],
         };
 
         let compiled = compile(&module);

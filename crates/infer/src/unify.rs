@@ -95,6 +95,9 @@ pub fn unify(t1: &Type, t2: &Type) -> Result<Subst, UnifyError> {
             Ok(s)
         }
 
+        // Struct types - same struct ID means same type
+        (Type::Struct(id1), Type::Struct(id2)) if id1 == id2 => Ok(Subst::new()),
+
         // Mismatch
         _ => Err(UnifyError::Mismatch {
             expected: t1.clone(),

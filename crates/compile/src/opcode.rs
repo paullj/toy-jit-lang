@@ -76,15 +76,20 @@ pub enum Opcode {
     TupleNew = 44, // dst:u8, elem_base:u8, elem_count:u8
     TupleGet = 45, // dst:u8, tuple:u8, index:u8
 
+    // Struct operations (3)
+    StructNew = 46, // dst:u8, struct_id:u16, field_base:u8, field_count:u8
+    StructGet = 47, // dst:u8, struct:u8, field_index:u8
+    StructSet = 48, // struct:u8, field_index:u8, value:u8
+
     // End (1)
-    Halt = 46,
+    Halt = 49,
 }
 
 impl Opcode {
     /// Decode opcode from u8.
     #[inline(always)]
     pub fn from_u8(byte: u8) -> Option<Opcode> {
-        if byte <= 45 {
+        if byte <= 49 {
             // NOTE: We verified the byte is in range (0..=Halt)
             Some(unsafe { std::mem::transmute::<u8, opcode::Opcode>(byte) })
         } else {

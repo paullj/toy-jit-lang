@@ -391,6 +391,33 @@ impl BytecodeWriter {
         self.write_u8(tuple);
         self.write_u8(index);
     }
+
+    // === Struct operations ===
+
+    /// StructNew: dst:u8, struct_id:u16, field_base:u8, field_count:u8
+    pub fn emit_struct_new(&mut self, dst: u8, struct_id: u16, field_base: u8, field_count: u8) {
+        self.emit_op(Opcode::StructNew);
+        self.write_u8(dst);
+        self.write_u16(struct_id);
+        self.write_u8(field_base);
+        self.write_u8(field_count);
+    }
+
+    /// StructGet: dst:u8, struct:u8, field_index:u8
+    pub fn emit_struct_get(&mut self, dst: u8, struct_ref: u8, field_index: u8) {
+        self.emit_op(Opcode::StructGet);
+        self.write_u8(dst);
+        self.write_u8(struct_ref);
+        self.write_u8(field_index);
+    }
+
+    /// StructSet: struct:u8, field_index:u8, value:u8
+    pub fn emit_struct_set(&mut self, struct_ref: u8, field_index: u8, value: u8) {
+        self.emit_op(Opcode::StructSet);
+        self.write_u8(struct_ref);
+        self.write_u8(field_index);
+        self.write_u8(value);
+    }
 }
 
 impl Default for BytecodeWriter {

@@ -31,6 +31,16 @@ impl fmt::Display for TypeVar {
     }
 }
 
+/// Struct ID for identifying struct types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StructId(pub u32);
+
+impl fmt::Display for StructId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "struct#{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Integer,
@@ -39,9 +49,14 @@ pub enum Type {
     String,
     Unit,
     Var(TypeVar),
-    Function { params: Vec<Type>, ret: Box<Type> },
+    Function {
+        params: Vec<Type>,
+        ret: Box<Type>,
+    },
     List(Box<Type>),
     Tuple(Vec<Type>),
+    /// Struct type, identified by StructId
+    Struct(StructId),
     Error,
 }
 
@@ -79,7 +94,13 @@ impl Type {
                     elem.collect_free_vars(vars);
                 }
             }
-            _ => {}
+            Type::Struct(_)
+            | Type::Integer
+            | Type::Float
+            | Type::Boolean
+            | Type::String
+            | Type::Unit
+            | Type::Error => {}
         }
     }
 }
@@ -125,6 +146,7 @@ impl fmt::Display for Type {
                 }
                 write!(f, ")")
             }
+            Type::Struct(id) => write!(f, "{}", id),
             Type::Error => write!(f, "<error>"),
         }
     }

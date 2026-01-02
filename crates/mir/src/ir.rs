@@ -308,6 +308,26 @@ pub enum Inst {
         tuple: Operand,
         index: u32,
     },
+
+    // Struct operations
+    /// Create a new struct with given struct_id and field values
+    StructNew {
+        dst: VReg,
+        struct_id: u32,
+        fields: Vec<Operand>,
+    },
+    /// Get field from struct by index: dst = struct.field_index
+    StructGet {
+        dst: VReg,
+        struct_ref: Operand,
+        field_index: u32,
+    },
+    /// Set field in struct by index: struct.field_index = value
+    StructSet {
+        struct_ref: Operand,
+        field_index: u32,
+        value: Operand,
+    },
 }
 
 impl Inst {
@@ -379,11 +399,20 @@ impl Function {
     }
 }
 
+/// Struct type metadata for display
+#[derive(Debug, Clone)]
+pub struct StructMeta {
+    pub struct_id: u32,
+    pub name: String,
+    pub field_names: Vec<String>,
+}
+
 /// A compiled module containing functions
 #[derive(Debug, Clone)]
 pub struct Module {
     pub functions: Vec<Function>,
     pub main_id: FuncId,
+    pub struct_metadata: Vec<StructMeta>,
 }
 
 impl Module {

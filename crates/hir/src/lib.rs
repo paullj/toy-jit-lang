@@ -44,6 +44,7 @@ impl fmt::Debug for Ident {
 #[derive(Debug, Clone)]
 pub enum Item {
     Definition(Definition),
+    StructDefinition(StructDef),
     Assignment {
         name: Ident,
         value: Expression,
@@ -53,7 +54,26 @@ pub enum Item {
         index: ExprIdx,
         value: Expression,
     },
+    FieldAssignment {
+        object: ExprIdx,
+        field: Ident,
+        value: Expression,
+    },
     Expression(Expression),
+}
+
+/// Struct field definition (name and type)
+#[derive(Debug, Clone)]
+pub struct StructField {
+    pub name: Ident,
+    pub ty: Ident,
+}
+
+/// Struct type definition
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: Ident,
+    pub fields: Vec<StructField>,
 }
 
 #[derive(Debug, Clone)]
@@ -162,6 +182,17 @@ pub enum Expression {
         tuple: ExprIdx,
         index: u32,
     },
+    /// Struct literal expression: `Point { x: 1, y: 2 }`
+    Struct {
+        name: Ident,
+        fields: Vec<(Ident, ExprIdx)>,
+        spread: Option<ExprIdx>,
+    },
+    /// Field access expression: `point.x`
+    FieldAccess {
+        object: ExprIdx,
+        field: Ident,
+    },
 }
 
 /// Item inside a block expression
@@ -192,6 +223,12 @@ pub enum BlockItem {
     },
     Continue {
         label: Option<Ident>,
+    },
+    /// Field assignment in a block: `point.x = 10`
+    FieldAssignment {
+        object: ExprIdx,
+        field: Ident,
+        value: ExprIdx,
     },
 }
 

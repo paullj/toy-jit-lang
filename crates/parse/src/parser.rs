@@ -90,6 +90,11 @@ impl<'a> Parser<'a> {
             .unwrap_or_else(|| self.source.last_span())
     }
 
+    /// Check if the Nth token (0-indexed) matches the given kind
+    pub(crate) fn peek_at(&mut self, n: usize, kind: TokenKind) -> bool {
+        self.source.peek_nth(n) == Some(kind)
+    }
+
     /// Consume token if it matches, returns whether consumed
     pub(crate) fn eat(&mut self, kind: TokenKind) -> bool {
         if self.at(kind) {

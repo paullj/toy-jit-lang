@@ -37,10 +37,16 @@ impl<'a> Vm<'a> {
         let main = module.main();
         let frame_size = main.local_count as usize + main.register_count as usize;
 
+        let mut heap = Heap::new();
+        // Register struct metadata for display purposes
+        for meta in &module.struct_metadata {
+            heap.register_struct_meta(meta.struct_id, meta.name.clone(), meta.field_names.clone());
+        }
+
         Self {
             stack: Box::new([Value::unit(); MAX_STACK_SIZE]),
             stack_top: frame_size,
-            heap: Heap::new(),
+            heap,
             strings: &module.strings,
             frames: [CallFrame::default(); MAX_FRAMES],
             frame_count: 0, // main doesn't push a frame initially
@@ -698,6 +704,42 @@ impl<'a> Vm<'a> {
                     let tuple_data = self.heap.get_tuple(tuple_idx);
                     let result = tuple_data.elements[index as usize];
                     self.set(base, dst, result);
+                }
+                // Struct operations
+                Opcode::StructNew => {
+                    let dst = reader.read_u8();
+                    let struct_id = reader.read_u16();
+                    let field_base = reader.read_u8();
+                    let field_count = reader.read_u8();
+                    self.maybe_gc();
+
+                    let fields: Vec<Value> = (0..field_count)
+                        .map(|i| self.get(base, field_base + i))
+                        .collect();
+
+                    let struct_idx = self.heap.alloc_struct(struct_id as u32, fields);
+                    let result = Value::struct_obj(struct_idx);
+                    self.set(base, dst, result);
+                }
+                Opcode::StructGet => {
+                    let dst = reader.read_u8();
+                    let struct_ref = reader.read_u8();
+                    let field_index = reader.read_u8();
+
+                    let struct_idx = self.get(base, struct_ref).as_struct_idx_unchecked();
+                    let struct_data = self.heap.get_struct(struct_idx);
+                    let result = struct_data.fields[field_index as usize];
+                    self.set(base, dst, result);
+                }
+                Opcode::StructSet => {
+                    let struct_ref = reader.read_u8();
+                    let field_index = reader.read_u8();
+                    let value = reader.read_u8();
+
+                    let struct_idx = self.get(base, struct_ref).as_struct_idx_unchecked();
+                    let val = self.get(base, value);
+                    let struct_data = self.heap.get_struct_mut(struct_idx);
+                    struct_data.fields[field_index as usize] = val;
                 }
                 // End
                 Opcode::Halt => {

@@ -132,6 +132,32 @@ impl fmt::Display for Inst {
             Inst::TupleGet { dst, tuple, index } => {
                 write!(f, "{} = tuple_get {} {}", dst, tuple, index)
             }
+            // Struct operations
+            Inst::StructNew {
+                dst,
+                struct_id,
+                fields,
+            } => {
+                write!(f, "{} = struct_new #{}", dst, struct_id)?;
+                for field in fields {
+                    write!(f, " {}", field)?;
+                }
+                Ok(())
+            }
+            Inst::StructGet {
+                dst,
+                struct_ref,
+                field_index,
+            } => {
+                write!(f, "{} = struct_get {} .{}", dst, struct_ref, field_index)
+            }
+            Inst::StructSet {
+                struct_ref,
+                field_index,
+                value,
+            } => {
+                write!(f, "struct_set {} .{} = {}", struct_ref, field_index, value)
+            }
         }
     }
 }

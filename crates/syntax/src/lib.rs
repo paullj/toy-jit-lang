@@ -74,6 +74,7 @@ pub enum SyntaxKind {
     ContinueKeyword,
     ForKeyword,
     InKeyword,
+    StructKeyword,
 
     // Tokens - Literals
     Identifier,
@@ -122,6 +123,14 @@ pub enum SyntaxKind {
     // Tuple nodes
     TupleExpression,
     TupleAccessExpression,
+
+    // Struct nodes
+    StructDefinition,
+    StructFieldDef,
+    StructExpression,
+    StructFieldInit,
+    FieldAccessExpression,
+    FieldAssignment,
 }
 
 impl SyntaxKind {
@@ -204,6 +213,7 @@ impl From<TokenKind> for SyntaxKind {
             TokenKind::Continue => SyntaxKind::ContinueKeyword,
             TokenKind::For => SyntaxKind::ForKeyword,
             TokenKind::In => SyntaxKind::InKeyword,
+            TokenKind::Struct => SyntaxKind::StructKeyword,
 
             // Literals
             TokenKind::Identifier => SyntaxKind::Identifier,

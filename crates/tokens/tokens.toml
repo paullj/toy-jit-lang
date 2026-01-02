@@ -313,6 +313,12 @@ literal = "in"
 category = "keyword"
 textmate_scope = "keyword.control.loop.toy"
 
+[[tokens]]
+name = "Struct"
+literal = "struct"
+category = "keyword"
+textmate_scope = "keyword.declaration.struct.toy"
+
 # Literals
 [[tokens]]
 name = "Identifier"
