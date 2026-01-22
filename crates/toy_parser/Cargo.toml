@@ -1,0 +1,18 @@
+[package]
+name = "toy_parser"
+authors = ["Paul Lavender-Jones <paul@lavender-jones.com>"]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+toy_lexer.workspace = true
+toy_cst.workspace = true
+miette.workspace = true
+thiserror.workspace = true
+drop_bomb = "0.1.5"
+
+[dev-dependencies]
+expect-test = "1.5.1"
+rstest = "0.26.1"

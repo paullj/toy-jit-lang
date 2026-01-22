@@ -22,3 +22,14 @@ result := {
     a + b  # The value of the block is 15
 }
 ```
+
+You can explicitly return a value from a block using the `return` keyword
+
+```toy
+result := {
+    a := 5
+    b := 10
+    return a * b  # The value of the block is 50
+    a + b         # This line is not reached
+}
+```

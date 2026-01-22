@@ -1,3 +1,5 @@
 /target
+.toy
 .DS_Store
+tmp
 docs/plans

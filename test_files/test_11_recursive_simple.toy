@@ -1,0 +1,11 @@
+# Test 11: Simple recursion - countdown
+fn countdown(n) {
+    if n == 0 {
+        0
+    } else {
+        countdown(n - 1)
+    }
+}
+
+result := countdown(5)
+echo result

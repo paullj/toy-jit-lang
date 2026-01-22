@@ -1,0 +1,397 @@
+#:schema ./tokens.schema.json
+# NOTE: This is the source for tokens and syntax highlighting
+
+[meta]
+name = "toy"
+file_extensions = [".toy"]
+scope_name = "source.toy"
+
+# Trivia tokens (ignored in parsing)
+[[tokens]]
+name = "Whitespace"
+regex = "[ \\t\\f]+"
+category = "trivia"
+
+[[tokens]]
+name = "Comment"
+regex = "#[^\\r\\n]*"
+category = "trivia"
+textmate_scope = "comment.line.number-sign.toy"
+
+[[tokens]]
+name = "DocComment"
+regex = "##[^\\r\\n]*"
+category = "trivia"
+priority = 3
+textmate_scope = "comment.line.documentation.toy"
+
+[[tokens]]
+name = "NewLine"
+regex = "[\\r\\n]"
+category = "trivia"
+
+# Punctuation
+[[tokens]]
+name = "LeftParenthesis"
+literal = "("
+category = "punctuation"
+textmate_scope = "punctuation.paren.open.toy"
+
+[[tokens]]
+name = "RightParenthesis"
+literal = ")"
+category = "punctuation"
+textmate_scope = "punctuation.paren.close.toy"
+
+[[tokens]]
+name = "LeftBrace"
+literal = "{"
+category = "punctuation"
+textmate_scope = "punctuation.brace.open.toy"
+
+[[tokens]]
+name = "RightBrace"
+literal = "}"
+category = "punctuation"
+textmate_scope = "punctuation.brace.close.toy"
+
+[[tokens]]
+name = "LeftBracket"
+literal = "["
+category = "punctuation"
+textmate_scope = "punctuation.bracket.open.toy"
+
+[[tokens]]
+name = "RightBracket"
+literal = "]"
+category = "punctuation"
+textmate_scope = "punctuation.bracket.close.toy"
+
+[[tokens]]
+name = "Comma"
+literal = ","
+category = "punctuation"
+textmate_scope = "punctuation.comma.toy"
+
+[[tokens]]
+name = "Colon"
+literal = ":"
+category = "punctuation"
+textmate_scope = "punctuation.colon.toy"
+
+[[tokens]]
+name = "DotDot"
+literal = ".."
+category = "operator"
+priority = 2
+textmate_scope = "keyword.operator.range.toy"
+
+[[tokens]]
+name = "Dot"
+literal = "."
+category = "punctuation"
+textmate_scope = "punctuation.accessor.toy"
+
+# Arithmetic operators (int)
+[[tokens]]
+name = "Plus"
+literal = "+"
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.toy"
+
+[[tokens]]
+name = "Minus"
+literal = "-"
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.toy"
+
+[[tokens]]
+name = "Asterisk"
+literal = "*"
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.toy"
+
+[[tokens]]
+name = "Slash"
+literal = "/"
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.toy"
+
+[[tokens]]
+name = "Percent"
+literal = "%"
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.toy"
+
+# Float arithmetic operators
+[[tokens]]
+name = "PlusDot"
+literal = "+."
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.float.toy"
+
+[[tokens]]
+name = "MinusDot"
+literal = "-."
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.float.toy"
+
+[[tokens]]
+name = "AsteriskDot"
+literal = "*."
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.float.toy"
+
+[[tokens]]
+name = "SlashDot"
+literal = "/."
+category = "operator"
+textmate_scope = "keyword.operator.arithmetic.float.toy"
+
+# Comparison operators
+[[tokens]]
+name = "Equals"
+literal = "="
+category = "operator"
+textmate_scope = "keyword.operator.assignment.toy"
+
+[[tokens]]
+name = "EqualsEquals"
+literal = "=="
+category = "operator"
+textmate_scope = "keyword.operator.comparison.toy"
+
+[[tokens]]
+name = "NotEquals"
+literal = "!="
+category = "operator"
+textmate_scope = "keyword.operator.comparison.toy"
+
+[[tokens]]
+name = "Bang"
+literal = "!"
+category = "operator"
+textmate_scope = "keyword.operator.logical.toy"
+
+[[tokens]]
+name = "GreaterThan"
+literal = ">"
+category = "operator"
+textmate_scope = "keyword.operator.comparison.toy"
+
+[[tokens]]
+name = "LessThan"
+literal = "<"
+category = "operator"
+textmate_scope = "keyword.operator.comparison.toy"
+
+[[tokens]]
+name = "GreaterThanOrEqual"
+literal = ">="
+category = "operator"
+textmate_scope = "keyword.operator.comparison.toy"
+
+[[tokens]]
+name = "LessThanOrEqual"
+literal = "<="
+category = "operator"
+textmate_scope = "keyword.operator.comparison.toy"
+
+# Float comparison operators
+[[tokens]]
+name = "GreaterThanDot"
+literal = ">."
+category = "operator"
+textmate_scope = "keyword.operator.comparison.float.toy"
+
+[[tokens]]
+name = "LessThanDot"
+literal = "<."
+category = "operator"
+textmate_scope = "keyword.operator.comparison.float.toy"
+
+[[tokens]]
+name = "GreaterThanOrEqualDot"
+literal = ">=."
+category = "operator"
+textmate_scope = "keyword.operator.comparison.float.toy"
+
+[[tokens]]
+name = "LessThanOrEqualDot"
+literal = "<=."
+category = "operator"
+textmate_scope = "keyword.operator.comparison.float.toy"
+
+# Keywords
+[[tokens]]
+name = "And"
+literal = "and"
+category = "keyword"
+textmate_scope = "keyword.operator.logical.toy"
+
+[[tokens]]
+name = "Or"
+literal = "or"
+category = "keyword"
+textmate_scope = "keyword.operator.logical.toy"
+
+[[tokens]]
+name = "True"
+literal = "true"
+category = "keyword"
+textmate_scope = "constant.language.boolean.toy"
+
+[[tokens]]
+name = "False"
+literal = "false"
+category = "keyword"
+textmate_scope = "constant.language.boolean.toy"
+
+[[tokens]]
+name = "If"
+literal = "if"
+category = "keyword"
+textmate_scope = "keyword.control.conditional.toy"
+
+[[tokens]]
+name = "Else"
+literal = "else"
+category = "keyword"
+textmate_scope = "keyword.control.conditional.toy"
+
+[[tokens]]
+name = "Fn"
+literal = "fn"
+category = "keyword"
+textmate_scope = "keyword.declaration.function.toy"
+
+[[tokens]]
+name = "Return"
+literal = "return"
+category = "keyword"
+textmate_scope = "keyword.control.flow.toy"
+
+[[tokens]]
+name = "Echo"
+literal = "echo"
+category = "keyword"
+textmate_scope = "keyword.control.flow.toy"
+
+[[tokens]]
+name = "Loop"
+literal = "loop"
+category = "keyword"
+textmate_scope = "keyword.control.loop.toy"
+
+[[tokens]]
+name = "While"
+literal = "while"
+category = "keyword"
+textmate_scope = "keyword.control.loop.toy"
+
+[[tokens]]
+name = "Break"
+literal = "break"
+category = "keyword"
+textmate_scope = "keyword.control.flow.toy"
+
+[[tokens]]
+name = "Continue"
+literal = "continue"
+category = "keyword"
+textmate_scope = "keyword.control.flow.toy"
+
+[[tokens]]
+name = "For"
+literal = "for"
+category = "keyword"
+textmate_scope = "keyword.control.loop.toy"
+
+[[tokens]]
+name = "In"
+literal = "in"
+category = "keyword"
+textmate_scope = "keyword.control.loop.toy"
+
+[[tokens]]
+name = "Pub"
+literal = "pub"
+category = "keyword"
+textmate_scope = "keyword.other.visibility.toy"
+
+[[tokens]]
+name = "Use"
+literal = "use"
+category = "keyword"
+textmate_scope = "keyword.control.import.toy"
+
+[[tokens]]
+name = "As"
+literal = "as"
+category = "keyword"
+textmate_scope = "keyword.control.import.toy"
+
+# Literals
+[[tokens]]
+name = "Identifier"
+regex = "[a-zA-Z][a-zA-Z0-9_]*"
+category = "identifier"
+textmate_scope = "variable.other.toy"
+
+[[tokens]]
+name = "BinaryInteger"
+regex = "0b[01]+(?:_[01]+)*"
+category = "number"
+textmate_scope = "constant.numeric.integer.binary.toy"
+
+[[tokens]]
+name = "OctalInteger"
+regex = "0o[0-7]+(?:_[0-7]+)*"
+category = "number"
+textmate_scope = "constant.numeric.integer.octal.toy"
+
+[[tokens]]
+name = "HexInteger"
+regex = "0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*"
+category = "number"
+textmate_scope = "constant.numeric.integer.hexadecimal.toy"
+
+[[tokens]]
+name = "Integer"
+regex = "[0-9]+(?:_[0-9]+)*"
+category = "number"
+textmate_scope = "constant.numeric.integer.decimal.toy"
+
+[[tokens]]
+name = "Float"
+regex = "[0-9]+(?:_[0-9]+)*\\.[0-9]+(?:_[0-9]+)*(?:[eE][+-]?[0-9]+)?"
+category = "number"
+textmate_scope = "constant.numeric.float.toy"
+
+[[tokens]]
+name = "FloatExponent"
+regex = "[0-9]+(?:_[0-9]+)*[eE][+-]?[0-9]+"
+category = "number"
+textmate_scope = "constant.numeric.float.toy"
+
+[[tokens]]
+name = "String"
+regex = "\"(?:[^\"\\\\]|\\\\.)*\""
+category = "string"
+textmate_scope = "string.quoted.double.toy"
+
+[[tokens]]
+name = "MultiLineString"
+regex = "\"\"\"[^\"]*\"\"\""
+category = "string"
+textmate_scope = "string.quoted.triple.toy"
+
+# Semantic token types for LSP (maps category -> semantic token type)
+[semantic_tokens]
+keyword = "keyword"
+operator = "operator"
+number = "number"
+string = "string"
+identifier = "variable"
+punctuation = "punctuation"
+trivia = "comment"

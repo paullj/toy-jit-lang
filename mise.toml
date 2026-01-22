@@ -41,20 +41,20 @@ run = "cargo run --release -- bench --baseline benchmarks/baseline.json"
 
 [tasks."run:opt"]
 description = "Run with thin LTO optimisations"
-run = "cargo run --profile optimised -- run {{arg(i=0)}}"
+run = "cargo run --profile optimized -- run {{arg(i=0)}}"
 
 [tasks."run:max"]
 description = "Run with maximum optimisations (fat LTO)"
-run = "cargo run --profile optimised-max -- run {{arg(i=0)}}"
+run = "cargo run --profile optimized -- run {{arg(i=0)}}"
 
 [tasks."build:opt"]
 description = "Build with thin LTO optimisations"
-run = "cargo build --profile optimised"
+run = "cargo build --profile optimized"
 
 [tasks."build:max"]
 description = "Build with maximum optimisations (fat LTO)"
-run = "cargo build --profile optimised-max"
+run = "cargo build --profile optimized"
 
 [tasks."bench:opt"]
 description = "Run benchmarks with optimised profile"
-run = "cargo run --profile optimised -- bench"
+run = "cargo run --profile optimized -- bench"

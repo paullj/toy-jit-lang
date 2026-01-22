@@ -1,0 +1,15 @@
+[package]
+name = "toy_mir"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+toy_hir.workspace = true
+toy_typecheck.workspace = true
+la-arena.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+toy_ast.workspace = true
+toy_parser.workspace = true

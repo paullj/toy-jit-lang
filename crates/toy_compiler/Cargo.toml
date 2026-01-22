@@ -1,0 +1,30 @@
+[package]
+name = "toy_compiler"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+toy_lexer.workspace = true
+toy_parser.workspace = true
+toy_cst.workspace = true
+toy_ast.workspace = true
+toy_hir.workspace = true
+toy_mir.workspace = true
+toy_typecheck.workspace = true
+toy_codegen.workspace = true
+toy_resolve.workspace = true
+
+log.workspace = true
+miette.workspace = true
+thiserror.workspace = true
+lasso.workspace = true
+la-arena.workspace = true
+
+salsa = { version = "0.25", features = ["persistence", "accumulator"] }
+threadpool = "1.8"
+
+[dev-dependencies]
+clap.workspace = true
+toy_logger.workspace = true
+env_logger = "0.10"

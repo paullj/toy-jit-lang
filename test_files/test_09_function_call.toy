@@ -1,0 +1,7 @@
+# Test 09: Function call without parameters
+fn get_answer() {
+    42
+}
+
+result := get_answer()
+echo result
