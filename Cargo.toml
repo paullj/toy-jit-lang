@@ -1,41 +1,40 @@
 [workspace]
 resolver = "3"
-members = [
-    "crates/tokens",
-    "crates/lex",
-    "crates/syntax",
-    "crates/parse",
-    "crates/ast",
-    "crates/hir",
-    "crates/infer",
-    "crates/mir",
-    "crates/jit",
-    "crates/compile",
-    "crates/vm",
-    "crates/runtime",
-    "crates/wasm",
-    "crates/analyse",
-    "crates/lsp",
-    "crates/cli",
-    "crates/bench",
-]
+members = ["crates/*"]
+exclude = ["crates/toy_lsp"]
 
-# Standard release
+[workspace.dependencies]
+toy_compiler = { path = "crates/toy_compiler" }
+toy_logger = { path = "crates/toy_logger" }
+toy_lexer = { path = "crates/toy_lexer" }
+toy_parser = { path = "crates/toy_parser" }
+toy_typecheck = { path = "crates/toy_typecheck" }
+toy_codegen = { path = "crates/toy_codegen" }
+toy_tokens = { path = "crates/toy_tokens" }
+toy_cst = { path = "crates/toy_cst" }
+toy_ast = { path = "crates/toy_ast" }
+toy_hir = { path = "crates/toy_hir" }
+toy_mir = { path = "crates/toy_mir" }
+toy_runtime = { path = "crates/toy_runtime" }
+toy_resolve = { path = "crates/toy_resolve" }
+
+log = "0.4"
+thiserror = "2.0.17"
+miette = { version = "7.6.0", features = ["fancy"] }
+clap = { version = "4.5", features = ["derive"] }
+lasso = { version = "0.7", features = ["multi-threaded", "serialize"] }
+la-arena = "0.3.1"
+
 [profile.release]
-opt-level = 3
 debug = false
-
-# Optimised (thin LTO)
-[profile.optimised]
-inherits = "release"
+opt-level = 3
 lto = "thin"
-codegen-units = 1
-panic = "abort"
-strip = true
 
-# Maximum optimisation (fat LTO, slow compile)
-[profile.optimised-max]
-inherits = "optimised"
+[profile.optimized]
+strip = true
+panic = "abort"
+inherits = "release"
+codegen-units = 1
 lto = "fat"
 
 [profile.profiling]

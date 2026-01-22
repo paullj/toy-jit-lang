@@ -1,0 +1,14 @@
+[package]
+name = "toy_cst"
+authors = ["Paul Lavender-Jones <paul@lavender-jones.com>"]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+toy_lexer.workspace = true
+
+lasso.workspace = true
+
+cstree = { version = "0.13", features = ["derive", "lasso_compat"] }

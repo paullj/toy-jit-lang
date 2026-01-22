@@ -28,12 +28,28 @@ toy is a simple programming language that is made for fun.
   * vscode extension
 
 **todo**
+
+* get incremental compiling good
+  * only recompile files which have changed
+  * run each file in thread to parse
+  * sync threads for module resolution and name resolution
+  * run in parallel again for function level up to mir generation
+  * persist to disk
+
+* make runtime good
+  * support heap based values
+  * garbage collection
+
+* lsp
+
 * bugs
   * defining a variable should return unit type, not the value assigned
     * not sure if this is a bug yet since we don't have functions yet so ignore
   * hover for variables doesn't show type in blocks
   * infer has some stuff in there which is not related to type inference
   * string consts not working properly in jit
+  * floats don't work with mir
+    * should mir have type information from type check?
 
 * improvements
   * rename int to Int, float to Float, bool to Bool, string to String
@@ -48,9 +64,6 @@ toy is a simple programming language that is made for fun.
     * they should both produce a slice? type
     * is this valid 10..9 or error? 10..10?
 
-  * tests for runtime vs jit consistency
-    * make sure they produce the same results for same inputs
-
 * more helpful warnings
   * let/var statements are not in this language, omit and use := instead
   * doc comments which are not attached to anything
@@ -60,20 +73,13 @@ toy is a simple programming language that is made for fun.
   * shadowing variables
   * unreachable code
 
-* clean up
-  * maybe make cli just a cli and move all the logic elsewhere
-  * review docs
-    * make it read better
-    * add more examples
-    * unsure if i should make the docs have useful examples or just focus on language features
+* review docs
+  * make it read better
+  * add more examples
+  * unsure if i should make the docs have useful examples or just focus on language features
 
-* tiered execution
-  * interpret code first
-  * profile hot paths
-  * jit compile hot paths
-
-* garbage collection improvements
-  * but what?
+* cli
+  * self update
 
 * structs
 * tuples
@@ -100,10 +106,7 @@ toy is a simple programming language that is made for fun.
     * libraries are multi file programs without a main entry point
       * can be built into a library file to be used by other programs
       * can be published to git repo
-
-  * build system
-    * portable build with embedded interpreter/jit
-    * cross-compilation support
+    * scripts can have use statements from std and pkg but nothing else. like uvx these are auto downloaded
 
 * extern functions / ffi
   * ability to call functions from other languages (e.g. c, rust)
@@ -134,10 +137,7 @@ toy is a simple programming language that is made for fun.
 
 * tree sitter?
 
-* improve playground
-  * ??
-
-
+* playground
 * good repl
   * lots of bugs right now
   * ? for help
@@ -147,10 +147,3 @@ toy is a simple programming language that is made for fun.
   * multiline editing
   * some way to see variables defined in the repl
   * should use vm probably
-
-* performance
-  * look at hot paths and jit
-  * optimise memory usage
-  * parallel parsing
-    * do we need cs-tree instead of rowan?
-  * parallel gc?

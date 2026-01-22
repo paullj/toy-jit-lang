@@ -1,0 +1,3 @@
+# Test 04: Echo a variable
+x := 5
+echo x

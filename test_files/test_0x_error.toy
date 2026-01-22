@@ -1,0 +1,7 @@
+# Test 0x: error handling
+
+fn add(a, b) {
+  a + b
+}
+
+echo add(1.0, 1)

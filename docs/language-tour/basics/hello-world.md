@@ -3,13 +3,12 @@
 `toy` programs can be run as scripts, published as libraries, or compiled to standalone executables.
 
 ```toy
-# TODO: Add this once we have a std lib and a way to actually make a meaningful hello world
+echo "Hi!"
 ```
 
-For the time being, you can run `toy` code using the REPL or by creating a `.toy` file and executing it with the `toy` command line tool.
+To run this program, save it to a file named `hello.toy` and execute the following command in your terminal:
 
 ```bash
-toy run hello_world.toy
+toy run hi.toy
+# Output: Hi!
 ```
-
-This will execute the `hello_world.toy` file using the `toy` interpreter.

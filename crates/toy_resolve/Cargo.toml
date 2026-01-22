@@ -1,0 +1,12 @@
+[package]
+name = "toy_resolve"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+petgraph = "0.8.3"
+text-size = "1.1"
+toy_ast = { path = "../toy_ast" }
+
+[dev-dependencies]
+toy_parser = { path = "../toy_parser" }

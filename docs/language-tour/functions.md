@@ -39,7 +39,7 @@ Functions can be called by using their name followed by parentheses containing a
 result := add(5, 10)
 ```
 
-Anonymous functions (lambdas) can be defined using the `fn` keyword without a name. They can be assigned to variables or passed as arguments to other functions:
+Anonymous functions can be defined using the `fn` keyword without a name. They can be assigned to variables or passed as arguments to other functions:
 
 ```toy
 increment := fn(x) { x + 1 }

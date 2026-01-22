@@ -1,0 +1,3 @@
+use greeting.hello
+
+hello("hi there")

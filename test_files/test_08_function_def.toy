@@ -1,0 +1,7 @@
+# Test 08: Simple function definition
+fn add(a, b) {
+    a + b
+}
+
+result := add(2, 3)
+echo result

@@ -26,12 +26,7 @@ x := 5
 
 > [!IMPORTANT]
 > In practice, most code will use the `:=` operator for variable declaration since its easier to read and leverages type inference.
-<!-- TODO: Move this into wherever we talk about tuples -->
-You can also declare multiple variables using tuple destructuring:
 
-```toy
-(x, y) := (10, 20)
-```
 
 Assigning to an existing variable is done with just the `=` operator:
 
@@ -39,26 +34,23 @@ Assigning to an existing variable is done with just the `=` operator:
 x = 10
 ```
 
-<!-- TODO: Make this syntax nicer to read, maybe not = but something else? > ~ | ! & -->
-<!--
 # Constants
 
-Constants are values that cannot be changed once assigned. They are declared using a _similar_ syntax to variables, but use the `=!` operator instead of the `=` assignment operator.
+Constants are values that cannot be changed once assigned. They are declared using a _similar_ syntax to variables, but use the `~` operator instead of the `=` assignment operator.
 
 ```toy
-x: int =! 10
+x: int ~ 10
 ```
 
 Like variables, constants can also be declared using the shorthand syntax with type inference:
 
 ```toy
-x :=! 10
+x :~ 10
 ```
 
 Unlike variables, attempting to reassign a constant will result in a compile-time error:
 
 ```toy
-x :=! 10
+x :~ 10
 x = 20  # This is not allowed!
 ```
--->

@@ -1,0 +1,11 @@
+[package]
+name = "toy_ast"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+toy_cst.workspace = true
+
+[dev-dependencies]
+toy_parser.workspace = true

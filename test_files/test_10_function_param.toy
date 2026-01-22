@@ -1,0 +1,7 @@
+# Test 10: Function with multiple parameters
+fn multiply(x, y) {
+    x * y
+}
+
+result := multiply(6, 7)
+echo result
